@@ -86,8 +86,8 @@ public:
 	void transmit();                      // If not suspended, Transmit a Frame from any Macs in Device with a Frame ready to transmit
 	void disconnect();                    // Disconnect all Macs in the Device that are connected to other Macs
 
-	void createBridge(unsigned short type = 0);
-	void createEndStation();
+	void createBridge(unsigned short type = 0);     // Helper function for creating a Device with a single Bridge Component
+	void createEndStation();                        // Helper function for creating a Device with a single End Station Component
 
 protected:
 	static unsigned short devCnt;

@@ -23,20 +23,6 @@ limitations under the License.
 
 
 
-SimLog::SimLog()
-{
-}
-
-SimLog::~SimLog()
-{
-}
-
-// SimLog;  // init globals: Time and logfile
-int SimLog::Time = 0;
-int SimLog::Debug = 0;
-std::ofstream SimLog::logFile("TestLinkAgg output.txt");
-
-
 unsigned short Device::devCnt = 0;
 
 Device::Device(int numMacs)	
