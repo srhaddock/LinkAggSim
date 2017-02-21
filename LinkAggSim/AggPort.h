@@ -221,7 +221,7 @@ private:
 	{
 	public:
 
-		enum MuxSmStates { NO_STATE, DETACHED, WAITING, ATTACHED, COLLECTING, DISTRIBUTING, COLL_DIST };
+		enum MuxSmStates { NO_STATE, DETACHED, WAITING, ATTACHED, COLLECTING, DISTRIBUTING, COLL_DIST, ATTACH, ATTACHED_WTR };
 
 		/*
 		static void resetMuxSM(AggPort& port);
