@@ -52,6 +52,7 @@ int AggPort::LacpMuxSM::run(AggPort& port, bool singleStep)
 	return (loop);
 }
 
+/*
 bool AggPort::LacpMuxSM::stepMuxSM(AggPort& port)
 {
 	MuxSmStates nextMuxSmState = MuxSmStates::NO_STATE;
@@ -113,7 +114,75 @@ bool AggPort::LacpMuxSM::stepMuxSM(AggPort& port)
 
 	return (transitionTaken);
 }
+/**/
 
+bool AggPort::LacpMuxSM::stepMuxSM(AggPort& port)
+{
+	MuxSmStates nextMuxSmState = MuxSmStates::NO_STATE;
+	bool transitionTaken = false;
+
+	bool portGoodToGo = port.actorAttached && port.PortEnabled && (port.waitToRestoreTimer == 0);
+	// Global transitions:
+	if (port.portSelected != selectedVals::SELECTED)
+	{
+		if (port.MuxSmState != MuxSmStates::DETACHED)
+			nextMuxSmState = enterDetached(port);
+	}
+	else if (port.actorAttached && !port.PortEnabled &&
+		((port.waitToRestoreTimer != port.waitToRestoreTime) ||
+		((port.MuxSmState != MuxSmStates::ATTACHED_WTR) && (port.waitToRestoreTime == 0))))
+	{
+		nextMuxSmState = enterAttachedWtr(port);
+	}
+	else if (portGoodToGo && !port.partnerOperPortState.sync)
+	{
+		if (port.MuxSmState != MuxSmStates::ATTACHED)
+			nextMuxSmState = enterAttached(port);
+	}
+	else if (portGoodToGo && port.partnerOperPortState.sync &&
+		!port.policy_coupledMuxControl && !port.partnerOperPortState.collecting && !port.actorOperPortState.collecting)
+	{
+		nextMuxSmState = enterCollecting(port);
+	}
+	else if (portGoodToGo && port.partnerOperPortState.sync &&
+		(port.policy_coupledMuxControl || port.partnerOperPortState.collecting) && !port.actorOperPortState.distributing)
+	{
+		nextMuxSmState = enterCollDist(port);
+	}
+	// State-specific transitions:
+	else switch (port.MuxSmState)
+	{
+	case MuxSmStates::DETACHED:
+		if ((port.portSelected == selectedVals::SELECTED) && !port.actorAttached && port.Ready)
+			nextMuxSmState = enterAttach(port);
+		break;
+	case MuxSmStates::ATTACH:
+	case MuxSmStates::ATTACHED_WTR:
+	case MuxSmStates::ATTACHED:
+	case MuxSmStates::COLLECTING:
+		break;
+	case MuxSmStates::COLL_DIST:
+		if (!port.policy_coupledMuxControl && !port.partnerOperPortState.collecting)
+			nextMuxSmState = enterCollecting(port);
+		break;
+	case MuxSmStates::WAITING:
+	case MuxSmStates::DISTRIBUTING:
+	default:
+		nextMuxSmState = enterDetached(port);
+		break;
+	}
+
+
+	if (nextMuxSmState != MuxSmStates::NO_STATE)
+	{
+		port.MuxSmState = nextMuxSmState;
+		transitionTaken = true;
+	}
+	else {}   // no change to MuxSmState (or anything else) 
+
+	return (transitionTaken);
+}
+/**/
 
 
 AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterDetached(AggPort& port)
@@ -124,7 +193,6 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterDetached(AggPort& port)
 		    << " is DETACHED from Aggregator "  << port.actorPortAggregatorIdentifier << "  ***" << dec << endl;
 	}
 	detachMuxFromAggregator(port);
-	port.actorAttached = false;
 	port.actorOperPortState.sync = false;
 	if (port.policy_coupledMuxControl)
 	{
@@ -140,7 +208,11 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterDetached(AggPort& port)
 		disableCollecting(port);
 	}
 	port.NTT = true;
-	port.ReadyN = false;  // Otherwise selection logic could set Ready at same time as Selected, before Mux enters Waiting and starts timer.
+
+	// For 2017 Mux machine, comment out next line and add the following two
+	// port.ReadyN = false;  // Otherwise selection logic could set Ready at same time as Selected, before Mux enters Waiting and starts timer.
+	port.Ready = false;
+	port.waitToRestoreTimer = 0;
 
 	return (MuxSmStates::DETACHED);
 }
@@ -167,14 +239,19 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterAttached(AggPort& port)
 			<< " is ATTACHED to Aggregator " << port.actorPortAggregatorIdentifier << "  ***" << dec << endl;
 	}
 
-	attachMuxToAggregator(port);
-	port.actorAttached = true;
+	// for new Mux have already attached mux to aggregator, so comment next line out
+	// attachMuxToAggregator(port);
 	port.actorOperPortState.sync = true;
-	if (port.policy_coupledMuxControl)
+	// for new Mux, always disable collecting and distributing in ATTACHED, so change next line to simply "if (true)"
+	// if (port.policy_coupledMuxControl)
+	if (true)
 	{
-		port.actorOperPortState.collecting = false;
-		disableCollectingDistributing(port);
-		port.actorOperPortState.distributing = false;
+		if (port.actorOperPortState.collecting || port.actorOperPortState.collecting)
+		{
+			port.actorOperPortState.collecting = false;
+			disableCollectingDistributing(port);
+			port.actorOperPortState.distributing = false;
+		}
 	}
 	else
 	{
@@ -201,7 +278,10 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterCollecting(AggPort& por
 
 	enableCollecting(port);
 	port.actorOperPortState.collecting = true;
-	disableDistributing(port);
+	// For new mux don't have to disable distributing since never pass through COLLECTING when going down,
+	//    but do need to set Sync True since may go directly from ATTACH to COLLECTING
+	// disableDistributing(port);
+	port.actorOperPortState.sync = true;
 	port.actorOperPortState.distributing = false;
 	port.NTT = true;
 
@@ -234,24 +314,68 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterCollDist(AggPort& port)
 	port.actorOperPortState.distributing = true;
 	enableCollectingDistributing(port);
 	port.actorOperPortState.collecting = true;
+	// For new mux set sync true.  Doesn't seem necessary since doesn't seem like you should be able to get here directly from
+	//     ATTACH, but won't hurt.
+	port.actorOperPortState.sync = true;
 	port.NTT = true;
 
 	return (MuxSmStates::COLL_DIST);
 }
 
+AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterAttach(AggPort& port)
+{
+	if ((SimLog::Debug > 3))
+	{
+		SimLog::logFile << "Time " << SimLog::Time << hex << ":  *** Port " << port.actorSystem.addrMid << ":" << port.actorPort.num
+			<< " is ATTACH for Aggregator " << port.actorPortAggregatorIdentifier << "  ***" << dec << endl;
+	}
+
+	attachMuxToAggregator(port);
+
+	return (MuxSmStates::ATTACH);
+}
+
+AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterAttachedWtr(AggPort& port)
+{
+	if ((SimLog::Debug > 3))
+	{
+		SimLog::logFile << "Time " << SimLog::Time << hex << ":  *** Port " << port.actorSystem.addrMid << ":" << port.actorPort.num
+			<< " is ATTACHED_WTR for Aggregator " << port.actorPortAggregatorIdentifier << "  ***" << dec << endl;
+	}
+
+	port.actorOperPortState.sync = false;
+	if (port.policy_coupledMuxControl)
+	{
+		port.actorOperPortState.collecting = false;
+		disableCollectingDistributing(port);
+		port.actorOperPortState.distributing = false;
+	}
+	else
+	{
+		disableDistributing(port);
+		port.actorOperPortState.distributing = false;
+		port.actorOperPortState.collecting = false;
+		disableCollecting(port);
+	}
+	port.waitToRestoreTimer = port.waitToRestoreTime;
+	port.NTT = true;
+
+	return (MuxSmStates::ATTACHED_WTR);
+}
+
+
 void AggPort::LacpMuxSM::attachMuxToAggregator(AggPort& port)
 {
-
+	port.actorAttached = true;
 }
 
 void AggPort::LacpMuxSM::detachMuxFromAggregator(AggPort& port)
 {
-
+	port.actorAttached = false;
 }
 
 void AggPort::LacpMuxSM::enableCollecting(AggPort& port)
 {
-	// no function in simulation
 	port.changePartnerOperDistAlg = true;
 }
 
@@ -262,7 +386,6 @@ void AggPort::LacpMuxSM::disableCollecting(AggPort& port)
 
 void AggPort::LacpMuxSM::enableDistributing(AggPort& port)
 {
-	// no function in simulation
 //	if (!port.actorOperPortState.distributing)  // Don't need to test this since only one way into this state
 	// If were going to add this test would have to set distributing true after calling enableDistributing
 
@@ -279,7 +402,6 @@ void AggPort::LacpMuxSM::enableDistributing(AggPort& port)
 
 void AggPort::LacpMuxSM::disableDistributing(AggPort& port)
 {
-	// no function in simulation
 	if (port.actorOperPortState.distributing)
 	{
 		port.changeActorOperDist = true;  
@@ -296,8 +418,6 @@ void AggPort::LacpMuxSM::disableDistributing(AggPort& port)
 
 void AggPort::LacpMuxSM::enableCollectingDistributing(AggPort& port)
 {
-	// no function in simulation
-
 	port.changeActorOperDist = true;
 	port.changePartnerOperDistAlg = true;
 
@@ -313,8 +433,6 @@ void AggPort::LacpMuxSM::enableCollectingDistributing(AggPort& port)
 
 void AggPort::LacpMuxSM::disableCollectingDistributing(AggPort& port)
 {
-	// no function in simulation
-
 	port.changeActorOperDist = true;  
 
 	if ((SimLog::Debug > 0))

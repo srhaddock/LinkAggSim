@@ -37,6 +37,33 @@ void LinkAgg::LacpSelection::runSelection()
 }
 
 /**/
+
+void LinkAgg::LacpSelection::adminAggregatorUpdate(std::vector<shared_ptr<AggPort>>& pAggPorts, std::vector<shared_ptr<Aggregator>>& pAggregators)
+{
+	for (unsigned short ax = 0; ax < pAggregators.size(); ax++)
+	{
+		Aggregator& agg = *pAggregators[ax];
+
+		if (agg.changeActorSystem)                                                   // If ActorSystem identifier has changed
+		{
+			clearAggregator(agg, pAggPorts);                                         //    then kick all ports off Aggregator
+			pAggPorts[ax]->portSelected = AggPort::selectedVals::UNSELECTED;         //    and unselect corresponding AggPort
+			agg.changeActorSystem = false;
+		}
+		if (agg.actorOperAggregatorKey != agg.actorAdminAggregatorKey)               // If admin key has changed
+		{
+			clearAggregator(agg, pAggPorts);                                         //    then kick all ports off Aggregator
+			agg.actorOperAggregatorKey = agg.actorAdminAggregatorKey;                //    and update oper key
+		}
+		if (!agg.getEnabled() && !agg.lagPorts.empty())                              // If aggregator disabled and LAG port list not empty
+		{
+			clearAggregator(agg, pAggPorts);                                         //    then kick all ports off Aggregator
+		}
+	}
+}
+
+
+
 void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAggPorts, std::vector<shared_ptr<Aggregator>>& pAggregators)
 {
 
@@ -83,7 +110,8 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		*     3)  Otherwise see if can find an Aggregator with no attached ports that are active.
 		*/
 //		if (pAggPorts[px]->MuxSmState == AggPort::LacpMuxSM::MuxSmStates::DETACHED)
-		if ((pAggPorts[px]->portSelected == AggPort::selectedVals::UNSELECTED) && !pAggPorts[px]->actorAttached)
+		if ((pAggPorts[px]->portSelected == AggPort::selectedVals::UNSELECTED) && !pAggPorts[px]->actorAttached
+			&& !pAggPorts[px]->changeActorOperDist)
 		{
 
 			pAggregators[pAggPorts[px]->actorPortAggregatorIndex]->lagPorts.remove(px);  // remove AggPort from lagPort list of previously selected Aggregator
@@ -208,6 +236,9 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				// Should be safe to add to list without checking to see if it is already on list
 				pAggPorts[px]->actorPortAggregatorIndex = chosenAggregatorIndex;                           // Update the selected aggregator index for this port 
 				pAggPorts[px]->actorPortAggregatorIdentifier = pAggregators[chosenAggregatorIndex]->aggregatorIdentifier;
+				// For new Mux, start wait_while_timer from here rather than in Mux machine
+				pAggPorts[px]->waitWhileTimer = AggPort::AggregateWaitTime;         // Wait a little to see if other ports are attaching 
+
 				/*
 				*  Would set portSelected to STANDBY instead of SELECTED if there was some condition that prevented the port from attaching
 				*    to the chosen aggregator, but the port cannot choose another aggregator without having two LAGs with with same LAGID.
@@ -237,9 +268,12 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 
 	}
 
-	for (unsigned short j = 0; j < pAggregators.size(); j++)       
-	//TODO:  should this merge with updateAggregatorStatus ?  should it be before actual Selection Logic ?
+	for (auto pAgg : pAggregators)
+//	for (unsigned short j = 0; j < pAggregators.size(); j++)    
 	{
+		/*
+	//TODO:  should this merge with updateAggregatorStatus ?  should it be before actual Selection Logic ?
+	//   The AggregatorReady part, at least, should be here
 		if (pAggregators[j]->changeActorSystem)                                                   // If ActorSystem identifier has changed
 		{
 			clearAggregator(*pAggregators[j], pAggPorts);                                         //    then kick all ports off Aggregator
@@ -255,12 +289,13 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		{
 			clearAggregator(*(pAggregators[j]), pAggPorts);                                       //    then kick all ports off Aggregator
 		}
+		/**/
 
 		int collPortsInLAG = 0;
 		int distPortsInLAG = 0;
-		pAggregators[j]->aggregatorReady = true;
+		pAgg->aggregatorReady = true;
 
-		for (auto lagPortIndex : pAggregators[j]->lagPorts)
+		for (auto lagPortIndex : pAgg->lagPorts)
 			{
 				AggPort& port = *(pAggPorts[lagPortIndex]);
 
@@ -269,15 +304,15 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				if ((port.portSelected == AggPort::selectedVals::SELECTED) && port.actorOperPortState.distributing)
 					distPortsInLAG++;
 
-				pAggregators[j]->aggregatorReady &= (port.actorOperPortState.sync ||  //TODO:  should this test actorAttached rather than actor.sync ?
-					(port.ReadyN && (port.portSelected == AggPort::selectedVals::SELECTED)));
-				// pAggregators[j]->aggregatorReady &= pAggPorts[i]->ReadyN;
-				// This code allows Ready asserted same cycle as final port(s) joining gets Selected, which means these final port(s) get 
-				//   Attached one cycle later than any port(s) that were already Waiting when final port(s) get Selected.
+				// For new mux, replace the following with a test of actorAttached and wait_while_timer expired
+				// pAgg->aggregatorReady &= (port.actorOperPortState.sync ||  //TODO:  should this test actorAttached rather than actor.sync ?
+				// 	(port.ReadyN && (port.portSelected == AggPort::selectedVals::SELECTED)));
+				pAgg->aggregatorReady &= (port.actorAttached ||
+					((port.portSelected == AggPort::selectedVals::SELECTED) && (port.waitWhileTimer == 0)));
 			}
 //		}
-		pAggregators[j]->receiveState = (collPortsInLAG > 0);           //TODO:  receiveState is not used anywhere and should be removed
-		pAggregators[j]->transmitState = (distPortsInLAG > 0);          //TODO:  transmitState is not used anywhere and should be removed
+		pAgg->receiveState = (collPortsInLAG > 0);           //TODO:  receiveState is not used anywhere and should be removed
+		pAgg->transmitState = (distPortsInLAG > 0);          //TODO:  transmitState is not used anywhere and should be removed
 
 		/**/
 	}

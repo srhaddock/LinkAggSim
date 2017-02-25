@@ -101,6 +101,9 @@ void LinkAgg::run(bool singleStep)
 			}
 		}
 
+		// Check for administrative changes to Aggregator configuration
+		LinkAgg::LacpSelection::adminAggregatorUpdate(pAggPorts, pAggregators);
+
 		// Run state machines
 		int transitions = 0;
 		for (unsigned short i = 0; i < nPorts; i++)              // For each Aggregation Port:
@@ -110,7 +113,11 @@ void LinkAgg::run(bool singleStep)
 			transitions += AggPort::LacpRxSM::run(*pAggPorts[i], true);
 			transitions += AggPort::LacpMuxSM::run(*pAggPorts[i], true);
 		}
+		updateAggregatorStatus();
+
+		//TODO:  Can you aggregate ports with different LACP versions?  Do you need to test for it?  Does partner LACP version need to be in DRCPDU?
 		LinkAgg::LacpSelection::runSelection(pAggPorts, pAggregators);
+
 		for (unsigned short i = 0; i < nPorts; i++)              // For each Aggregation Port:
 		{
 //			transitions += AggPort::LacpPeriodicSM::runPeriodicSM(*pAggPorts[i], true);
@@ -135,9 +142,6 @@ void LinkAgg::run(bool singleStep)
 //			transitions += AggPort::LacpTxSM::runTxSM(*pAggPorts[i], true);
 			transitions += AggPort::LacpTxSM::run(*pAggPorts[i], true);
 		}
-		//TODO:  Can you aggregate ports with different LACP versions?  Do you need to test for it?  Does partner LACP version need to be in DRCPDU?
-		//TODO:  Update aggregator status before or after transmit?
-		updateAggregatorStatus();
 
 		// Distribute
 		for (unsigned short i = 0; i < nPorts; i++)              // For each Aggregator:
@@ -173,15 +177,16 @@ void LinkAgg::updateAggregatorStatus()
 	for (auto pPort : pAggPorts)           // Walk through all Aggregation Ports
 	{
 		if (pPort->changeActorOperDist           // Set changeAggregationPorts as logical "or" of the changeActorOperDist flag
-			&& ((pPort->portSelected == AggPort::selectedVals::SELECTED) || pPort->actorOperPortState.sync)
+//			&& ((pPort->portSelected == AggPort::selectedVals::SELECTED) || pPort->actorOperPortState.sync)
 			)
 		{
 			pAggregators[pPort->actorPortAggregatorIndex]->changeAggregationPorts = true;
 		}
 		// Don't clear changeActorOperDist yet -- will be done later.
-		//TODO:  What action should be taken if MUX machine gets to DETACHED before changeActorOperDist is processed?
+		//TODO:  DONE:  What action should be taken if MUX machine gets to DETACHED before changeActorOperDist is processed?
 		//   Maybe need to qualify Selection Logic with "DETACHED && !changeActorOperDist" so cannot select new aggregator
-		//   until changeActorOperDist processed on old aggregator (in which case remove checks on "SELECTED || sync")
+		//   until changeActorOperDist processed on old aggregator (in which case remove checks on "SELECTED || sync").
+		//   Or maybe just move updateAggregatorStatus() before runSelection().
 
 		//  If the partner distribution algorithm parameters have changed for any port that is COLLECTING on an Aggregator,
 		//     update the Aggregator's distribution algorithm parameters.
@@ -256,7 +261,6 @@ void LinkAgg::updateAggregatorStatus()
 			//    or actorConversationAdminLink (or digest of) changed.
 		{
 			std::list<unsigned short> newActiveLinkList;  // Build a new list of the link numbers active on the LAG
-//			for (auto pPort : pAgg->lagPorts)             //   from list of Aggregation Ports on the LAG
 			for (auto lagPortIndex : pAgg->lagPorts)      //   from list of Aggregation Ports on the LAG
 			{
 				AggPort& port = *(pAggPorts[lagPortIndex]);
@@ -358,7 +362,7 @@ void LinkAgg::updateAggregatorStatus()
 	{
 		if (pPort->changeActorOperDist)
 		{
-			if (pPort->actorOperPortState.distributing)          // If Aggregation Port is distributing 
+			if (pPort->actorOperPortState.distributing)         // If Aggregation Port is distributing 
 			{                                                   //    then create new distribution and collection masks
 				for (int convID = 0; convID < 4096; convID++)   //    for all conversation ID values.
 				{
@@ -367,28 +371,27 @@ void LinkAgg::updateAggregatorStatus()
 					                                                 
 					pPort->portOperConversationMask[convID] = passConvID;   // If so then distribute this conversation ID. 
 					pPort->collectionConversationMask &= passConvID;        // Turn off collection if link number doesn't match.
-					                                                        // Keep change flag set so can come back and turn on collection
-					                                                        //    for a matching link number after the conversation ID has been
-					                                                        //    cleared in the collection mask for all other ports on the aggregator.
-
-				}
-				if (SimLog::Debug > 4)
-				{
-					SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << pPort->actorSystem.addrMid
-						<< ":" << pPort->actorPort.num << " Link " << dec << pPort->LinkNumberID << "   ConvMask = ";
-					for (int k = 0; k < 16; k++) SimLog::logFile << "  " << pPort->portOperConversationMask[k];
-					SimLog::logFile << endl;
 				}
 			}
 			else                                             // Else Aggregation Port not Distributing
 			{
 				pPort->portOperConversationMask.reset();        //    so no conversation IDs are distributed
 				pPort->collectionConversationMask.reset();      //    or collected.
-				pPort->changeActorOperDist = false;             //    Clear change flag since done with this Agg Port
+			}
+			// Keep change flag set so can come back and turn on collection
+			//    for a matching link number after the conversation ID has been
+			//    cleared in the collection mask for all other ports on the aggregator.
+
+			if (SimLog::Debug > 4)
+			{
+				SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << pPort->actorSystem.addrMid
+					<< ":" << pPort->actorPort.num << " Link " << dec << pPort->LinkNumberID << "   ConvMask = ";
+				for (int k = 0; k < 16; k++) SimLog::logFile << "  " << pPort->portOperConversationMask[k];
+				SimLog::logFile << endl;
 			}
 		}
 	}
-	//TODO:  Supposed to do this after have updated all ports (true at this point) and IppAllUpdate is false
+	//TODO:  Supposed to do the following after have updated all ports (true at this point) and IppAllUpdate is false
 	//          but not clear the IppAllUpdate test is really necessary
 	//  Before just cleared collection mask for Conversation IDs where the port's link number did not match the conversationLinkMap.
 	//     Now want to set the collection mask for Conversation IDs where the port's link number does match.

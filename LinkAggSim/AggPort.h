@@ -39,7 +39,7 @@ public:
 	void run(bool singleStep);
 
 private:
-	static const int fastPeriodicTime = 19;
+	static const int fastPeriodicTime = 1900;
 	static const int slowPeriodicTime = 3 * fastPeriodicTime;
 	static const int shortTimeout = 3 * fastPeriodicTime;
 	static const int longTimeout = 3 * slowPeriodicTime;
@@ -240,6 +240,8 @@ private:
 		static MuxSmStates enterCollecting(AggPort& port);
 		static MuxSmStates enterDistributing(AggPort& port);
 		static MuxSmStates enterCollDist(AggPort& port);
+		static MuxSmStates enterAttach(AggPort& port);
+		static MuxSmStates enterAttachedWtr(AggPort& port);
 		static void attachMuxToAggregator(AggPort& port);
 		static void detachMuxFromAggregator(AggPort& port);
 		static void enableCollecting(AggPort& port);

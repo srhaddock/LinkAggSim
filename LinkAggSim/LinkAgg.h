@@ -56,6 +56,7 @@ private:
 	public:
 //		static void resetSelection(AggPort& port);
 		static void runSelection(std::vector<shared_ptr<AggPort>>& pAggPorts, std::vector<shared_ptr<Aggregator>>& pAggregators);
+		static void adminAggregatorUpdate(std::vector<shared_ptr<AggPort>>& pAggPorts, std::vector<shared_ptr<Aggregator>>& pAggregators);
 
 	private:
 		static int findMatchingAggregator(int thisPort, std::vector<shared_ptr<AggPort>>& pAggPorts);

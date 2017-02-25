@@ -104,14 +104,14 @@ int _tmain(int argc, _TCHAR* argv[])
 	//  Select tests to run
 	//
 
-	basicLagTest(Devices);
+	// basicLagTest(Devices);
 	preferredAggregatorTest(Devices);
-	//	lagLoopbackTest(Devices);
-	//	nonAggregatablePortTest(Devices);
-	//	limitedAggregatorsTest(Devices);
+	// lagLoopbackTest(Devices);
+	// nonAggregatablePortTest(Devices);
+	// limitedAggregatorsTest(Devices);
 	dualHomingTest(Devices);
-	//	axbkHierarchicalLagTest(Devices);
-	//	distributionTest(Devices);
+	// axbkHierarchicalLagTest(Devices);
+	// distributionTest(Devices);
 
 	//
 	// Clean up devices.

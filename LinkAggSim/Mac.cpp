@@ -294,10 +294,10 @@ void Mac::Transmit()
 
 void Mac::Connect(shared_ptr<Mac> macA, shared_ptr<Mac> macB, unsigned short delay)
 {
-	if (SimLog::Debug > 0) SimLog::logFile << endl << "Time " << SimLog::Time << ":    ***** Creating link " 
+	if (SimLog::Debug > 0) SimLog::logFile << endl << "Time " << SimLog::Time << ":    ***** Connecting  " 
 		<< hex << "  MAC " << macA->macId.dev << ":" << macA->macId.sap << " to MAC "
 		<< macB->macId.dev << ":" << macB->macId.sap << " *****" << dec << endl;
-	cout << endl << "Time " << SimLog::Time << ":    ***** Creating link " 
+	cout << endl << "Time " << SimLog::Time << ":    ***** Connecting  " 
 		<< hex << "  MAC " << macA->macId.dev << ":" << macA->macId.sap << " to MAC "
 		<< macB->macId.dev << ":" << macB->macId.sap << " *****" << dec << endl;
 
@@ -314,6 +314,13 @@ void Mac::Disconnect(shared_ptr<Mac> macA)
 {
 	if (macA->linkPartner)
 	{
+		if (SimLog::Debug > 0) SimLog::logFile << endl << "Time " << SimLog::Time << ":    ***** Disconnecting  "
+			<< hex << "  MAC " << macA->macId.dev << ":" << macA->macId.sap << " to MAC "
+			<< macA->linkPartner->macId.dev << ":" << macA->linkPartner->macId.sap << " *****" << dec << endl;
+		cout << endl << "Time " << SimLog::Time << ":    ***** Disconnecting  "
+			<< hex << "  MAC " << macA->macId.dev << ":" << macA->macId.sap << " to MAC "
+			<< macA->linkPartner->macId.dev << ":" << macA->linkPartner->macId.sap << " *****" << dec << endl;
+
 		if (macA->linkPartner->linkPartner == macA)    // if Partner's Partner is this Mac
 		{
 			while (!(macA->linkPartner->requests.empty()))        // Flush all Partner's frames in flight
