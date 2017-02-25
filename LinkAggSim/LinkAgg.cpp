@@ -172,6 +172,7 @@ void LinkAgg::run(bool singleStep)
 	}
 }
 
+
 void LinkAgg::updateAggregatorStatus()
 {
 	for (auto pPort : pAggPorts)           // Walk through all Aggregation Ports
