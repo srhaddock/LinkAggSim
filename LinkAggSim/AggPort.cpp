@@ -63,7 +63,7 @@ AggPort::AggPort(unsigned char version, unsigned short systemNum, unsigned short
 	//TODO:  LACPv2 variables
 	enableLongLacpduXmit = true;
 	longLacpduXmit = true;
-	waitToRestoreTime = 0;
+	waitToRestoreTime = 30;
 	adminLinkNumberID = (portNum & 0x00ff) + 1;      // Add 1 because portNum starts at zero which is reserved for "no link"
 	LinkNumberID = adminLinkNumberID;
 	partnerLinkNumberID = adminLinkNumberID;

@@ -32,6 +32,7 @@ void AggPort::LacpMuxSM::reset(AggPort& port)
 void AggPort::LacpMuxSM::timerTick(AggPort& port)
 {
 	if (port.waitWhileTimer > 0) port.waitWhileTimer--;
+	if (port.waitToRestoreTimer > 0) port.waitToRestoreTimer--;
 }
 /**/
 

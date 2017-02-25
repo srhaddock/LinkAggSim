@@ -159,7 +159,15 @@ AggPort::LacpRxSM::RxSmStates AggPort::LacpRxSM::enterExpired(AggPort& port)
 		port.currentWhileTimer = port.shortTimeout;
 		port.actorOperPortState.expired = true;
 		// seems like should set NTT here so partner knows using short timeout and may soon default
-		if (port.actorLacpVersion >= 2) port.NTT = true;     // Added in AX-Cor-1, but no reason it could not have been in v1
+		if (port.actorLacpVersion >= 2)                     // Added in AX-Cor-1, but no reason it could not have been in v1
+		{
+			port.NTT = true;
+			if (SimLog::Debug > 6)
+			{
+				SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << port.actorSystem.addrMid
+					<< ":" << port.actorPort.num << " NTT: LacpRxSM enters EXPIRED " << dec << endl;
+			}
+		}
 
 		return (RxSmStates::EXPIRED);
 	}
