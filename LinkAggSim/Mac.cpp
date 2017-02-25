@@ -294,15 +294,15 @@ void Mac::Transmit()
 
 void Mac::Connect(shared_ptr<Mac> macA, shared_ptr<Mac> macB, unsigned short delay)
 {
-	if (SimLog::Debug > 0) SimLog::logFile << endl << "Time " << SimLog::Time << ":    ***** Connecting  " 
+	if (macA->linkPartner) Disconnect(macA);
+	if (macB->linkPartner) Disconnect(macB);
+
+	if (SimLog::Debug > 0) SimLog::logFile << endl << "Time " << SimLog::Time << ":    ***** Connecting  "
 		<< hex << "  MAC " << macA->macId.dev << ":" << macA->macId.sap << " to MAC "
 		<< macB->macId.dev << ":" << macB->macId.sap << " *****" << dec << endl;
 	cout << endl << "Time " << SimLog::Time << ":    ***** Connecting  " 
 		<< hex << "  MAC " << macA->macId.dev << ":" << macA->macId.sap << " to MAC "
 		<< macB->macId.dev << ":" << macB->macId.sap << " *****" << dec << endl;
-
-	if (macA->linkPartner) Disconnect(macA);
-	if (macB->linkPartner) Disconnect(macB);
 
 	macA->linkPartner = macB;
 	macB->linkPartner = macA;

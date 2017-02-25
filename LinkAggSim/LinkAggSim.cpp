@@ -55,6 +55,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	void dualHomingTest(std::vector<unique_ptr<Device>>& Devices);
 	void axbkHierarchicalLagTest(std::vector<unique_ptr<Device>>& Devices);
 	void distributionTest(std::vector<unique_ptr<Device>>& Devices);
+	void waitToRestoreTest(std::vector<unique_ptr<Device>>& Devices);
 
 	cout << "*** Start of program ***" << endl << endl;
 	if (SimLog::Debug > 0)
@@ -105,13 +106,14 @@ int _tmain(int argc, _TCHAR* argv[])
 	//
 
 	// basicLagTest(Devices);
-	preferredAggregatorTest(Devices);
+	// preferredAggregatorTest(Devices);
 	// lagLoopbackTest(Devices);
 	// nonAggregatablePortTest(Devices);
 	// limitedAggregatorsTest(Devices);
-	dualHomingTest(Devices);
+	// dualHomingTest(Devices);
 	// axbkHierarchicalLagTest(Devices);
 	// distributionTest(Devices);
+	waitToRestoreTest(Devices);
 
 	//
 	// Clean up devices.
@@ -1090,4 +1092,126 @@ void distributionTest(std::vector<unique_ptr<Device>>& Devices)
 }
 
 /**/
+void waitToRestoreTest(std::vector<unique_ptr<Device>>& Devices)
+{
+	int start = SimLog::Time;
+	// aliases
+	LinkAgg& dev0Lag = (LinkAgg&)*(Devices[0]->pComponents[1]);
+
+	cout << endl << endl << "   Wait-To-Restore Timer Tests:  " << endl << endl;
+	if (SimLog::Debug > 0)
+		SimLog::logFile << endl << endl << "   Wait-To-Restore Timer Tests:  " << endl << endl;
+
+	for (auto& pDev : Devices)
+	{
+		pDev->reset();   // Reset all devices
+	}
+
+	for (int i = 0; i < 1000; i++)
+	{
+		if (SimLog::Time == start + 1)
+		{   // Set waitToRestoreTime of all AggPorts in Bridge 0 to 30
+			for (auto pPort : dev0Lag.pAggPorts)
+			{
+				pPort->set_aAggPortWTRTime(30);
+			}
+			// Set AggPorts 6 and 7 of Bridge 0 for dual-homing
+			//     (Change Aggregator 6 and AggPorts 6 and 7 to a new key,
+			//      and disable Aggregator 7)
+			dev0Lag.pAggregators[6]->set_aAggActorAdminKey(defaultActorKey + 0x100);
+			dev0Lag.pAggPorts[6]->set_aAggPortActorAdminKey(defaultActorKey + 0x100);
+			dev0Lag.pAggPorts[7]->set_aAggPortActorAdminKey(defaultActorKey + 0x100);
+			dev0Lag.pAggregators[7]->setEnabled(false);
+		}
+
+		//  Make or break connections
+
+		if (SimLog::Time == start + 10)
+		{   // Create three links between Bridge 0 and End Station 3.
+			Mac::Connect((Devices[0]->pMacs[0]), (Devices[3]->pMacs[0]), 5);
+			Mac::Connect((Devices[0]->pMacs[1]), (Devices[3]->pMacs[1]), 5);
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
+		}
+		// Links 1, 2 and 3 come up in a LAG on Aggregators b00:200 and e03:200.
+
+		if (SimLog::Time == start + 10)
+		{   // Dual home Bridges 0 to Bridges 1 and 2.
+			Mac::Connect((Devices[0]->pMacs[6]), (Devices[1]->pMacs[6]), 5);
+			Mac::Connect((Devices[0]->pMacs[7]), (Devices[2]->pMacs[7]), 5);
+		}
+		// Link 7 comes up in a LAG on Aggregators b00:206 and b01:206.
+		// Link 8 has no available Aggregators.
+
+		if (SimLog::Time == start + 100)
+		{
+			Mac::Disconnect((Devices[0]->pMacs[1]));
+			Mac::Disconnect((Devices[0]->pMacs[2]));
+		}
+		// Links 2 and 3 go down leaving just Link 1 in LAG between Bridge 0 and End Station 3.
+
+		if (SimLog::Time == start + 115)
+		{
+			Mac::Connect((Devices[0]->pMacs[1]), (Devices[3]->pMacs[1]), 5);
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
+		}
+		// Reconnect Links 2 and 3, starting WTR timers.
+
+		if (SimLog::Time == start + 120)
+		{
+			Mac::Disconnect((Devices[0]->pMacs[2]));
+		}
+		// Link 3 goes down again.
+
+		if (SimLog::Time == start + 125)
+		{
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
+		}
+		// Reconnect Link 3, re-starting WTR timer.
+
+		// Link 2 should re-join LAG at around time 155 (time 115 plus WTR plus a LACPDU round trip time)
+		// Link 3 should re-join LAG at around time 165
+
+		if (SimLog::Time == start + 200)
+			Mac::Disconnect((Devices[0]->pMacs[6]));
+		// Link 7 goes down allowing Link 8 to take over the Aggregator and come up with Bridge 2.
+
+		if (SimLog::Time == start + 300)
+			Mac::Connect((Devices[0]->pMacs[6]), (Devices[1]->pMacs[6]), 5);
+		// Reconnect Link 7, starting WTR timer.
+		//    In the process the LAG moves to Aggregator b02:201 in Bridge 2.
+
+
+
+		if (SimLog::Time == start + 990)
+		{   // Restore key for all Aggregators in Bridge 0 to their default value
+			for (auto pAgg : dev0Lag.pAggregators)
+			{
+				pAgg->set_aAggActorAdminKey(defaultActorKey);
+			}
+
+			for (auto& pDev : Devices)
+			{
+				pDev->disconnect();      // Disconnect all remaining links on all devices
+			}
+		}
+
+		//  Run all state machines in all devices
+		for (auto& pDev : Devices)
+		{
+			pDev->timerTick();     // Decrement timers
+			pDev->run(true);       // Run device with single-step true
+		}
+
+		//  Transmit from any MAC with frames to transmit
+		for (auto& pDev : Devices)
+		{
+			pDev->transmit();
+		}
+
+		if (SimLog::Debug > 1)
+			SimLog::logFile << "*" << endl;
+		SimLog::Time++;
+	}
+
+}
 
