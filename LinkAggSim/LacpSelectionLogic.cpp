@@ -109,9 +109,11 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		*     2)  Otherwise, if policy is to choose preferred aggregator even if disrupts an active LAG, then see if can join preferred aggregator.
 		*     3)  Otherwise see if can find an Aggregator with no attached ports that are active.
 		*/
-//		if (pAggPorts[px]->MuxSmState == AggPort::LacpMuxSM::MuxSmStates::DETACHED)
 		if ((pAggPorts[px]->portSelected == AggPort::selectedVals::UNSELECTED) && !pAggPorts[px]->actorAttached
-			&& !pAggPorts[px]->changeActorOperDist)
+			&& !pAggPorts[px]->changeActorOperDist && !pAggPorts[px]->Ready)
+			// New mux machine added the !Ready term to above.  This is redundant with !actorAttached if qualified with UNSELECTED.
+			//    If not qualified with UNSELECTED (i.e. allow selection logic to change selected aggregator while wait_while timer
+			//    running) then need the !Ready term so that don't also allow selected aggregator to change in the ATTACH state.
 		{
 
 			pAggregators[pAggPorts[px]->actorPortAggregatorIndex]->lagPorts.remove(px);  // remove AggPort from lagPort list of previously selected Aggregator
@@ -119,8 +121,8 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 
 			unsigned short chosenAggregatorIndex = pAggPorts.size();   // assume no aggregator chosen yet
 
-			if ((!pAggPorts[px]->actorOperPortState.aggregation)       // If port is not aggregatable (i.e. is Individual)
-				&& pAggregators[px]->getEnabled())                     //     and the aggregator is enabled
+			if (!pAggPorts[px]->actorOperPortState.aggregation)       // If port is not aggregatable (i.e. is Individual)
+//				&& pAggregators[px]->getEnabled())                     //     and the aggregator is enabled
 			{
 				// This implements a policy that setting an AggPort "Individual" permanently reserves the corresponding Aggregator.
 				// This happens regardless of whether the Aggregator ActorSystem and Key match the AggPort,
@@ -295,15 +297,16 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		int distPortsInLAG = 0;
 		pAgg->aggregatorReady = true;
 
-		for (auto lagPortIndex : pAgg->lagPorts)
+		for (auto lagPortIndex : pAgg->lagPorts)    // Walk through all AggPorts on Aggregator
 			{
 				AggPort& port = *(pAggPorts[lagPortIndex]);
 
 				if ((port.portSelected == AggPort::selectedVals::SELECTED) && port.actorOperPortState.collecting)
-					collPortsInLAG++;
+					collPortsInLAG++;               // Count the AggPorts that are collecting
 				if ((port.portSelected == AggPort::selectedVals::SELECTED) && port.actorOperPortState.distributing)
-					distPortsInLAG++;
+					distPortsInLAG++;               // Count the AggPorts that are distributing
 
+				// Set aggregatorReady if all ports on Aggregator are either already attached or are selected and wait_while expired
 				// For new mux, replace the following with a test of actorAttached and wait_while_timer expired
 				// pAgg->aggregatorReady &= (port.actorOperPortState.sync ||  //TODO:  should this test actorAttached rather than actor.sync ?
 				// 	(port.ReadyN && (port.portSelected == AggPort::selectedVals::SELECTED)));
@@ -314,14 +317,24 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		pAgg->receiveState = (collPortsInLAG > 0);           //TODO:  receiveState is not used anywhere and should be removed
 		pAgg->transmitState = (distPortsInLAG > 0);          //TODO:  transmitState is not used anywhere and should be removed
 
+		for (auto lagPortIndex : pAgg->lagPorts)    // Walk through all AggPorts on Aggregator again
+		{
+			if (pAgg->aggregatorReady)                   // If aggregator is ready then set Ready of all AggPorts
+				pAggPorts[lagPortIndex]->Ready = true;   //    Note this structure will not clear AggPort Ready when !aggregatorReady
+			                                             //    because with new Mux machine Ready only cleared when enter DETACHED
+			                                             // Could also get rid of pAgg->aggregatorReady and just make it a local Boolean
+		}
 		/**/
 	}
 
+	/*
+	* This will cause Ready to be set on any port that is currently unselected and it's previously selected aggregator now has no 
+	* entries in lagPorts list.  Problem if use !Ready as test for running selection logic as proposed in Mick's write-up of new Mux machine.
 	for (auto& pPort : pAggPorts)                   // for each port copy aggregatorReady flag of selected aggregator to that port
 	{
 		pPort->Ready = pAggregators[pPort->actorPortAggregatorIndex]->aggregatorReady;
 	}
-
+	/**/
 }
 
 

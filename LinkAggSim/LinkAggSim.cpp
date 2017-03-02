@@ -106,7 +106,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	//
 
 	// basicLagTest(Devices);
-	// preferredAggregatorTest(Devices);
+	preferredAggregatorTest(Devices);
 	// lagLoopbackTest(Devices);
 	// nonAggregatablePortTest(Devices);
 	// limitedAggregatorsTest(Devices);
@@ -1172,13 +1172,39 @@ void waitToRestoreTest(std::vector<unique_ptr<Device>>& Devices)
 		// Link 3 should re-join LAG at around time 165
 
 		if (SimLog::Time == start + 200)
+		{
+			Mac::Disconnect((Devices[0]->pMacs[1]));
+			Mac::Disconnect((Devices[0]->pMacs[2]));
+		}
+		// Links 2 and 3 go down leaving just Link 1 in LAG between Bridge 0 and End Station 3.
+
+		if (SimLog::Time == start + 215)
+		{
+			Mac::Connect((Devices[0]->pMacs[1]), (Devices[3]->pMacs[1]), 5);
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
+		}
+		// Reconnect Links 2 and 3, starting WTR timers.
+
+		if (SimLog::Time == start + 230)
+		{
+			Mac::Disconnect((Devices[0]->pMacs[0]));
+		}
+		// Disconnect Link 3, allowing Links 2 and 3 to immediately rejoin.
+
+		if (SimLog::Time == start + 250)
+		{
+			Mac::Connect((Devices[0]->pMacs[0]), (Devices[3]->pMacs[0]), 5);
+		}
+		// Reconnect Link 1.
+
+
+		if (SimLog::Time == start + 500)
 			Mac::Disconnect((Devices[0]->pMacs[6]));
 		// Link 7 goes down allowing Link 8 to take over the Aggregator and come up with Bridge 2.
 
-		if (SimLog::Time == start + 300)
+		if (SimLog::Time == start + 600)
 			Mac::Connect((Devices[0]->pMacs[6]), (Devices[1]->pMacs[6]), 5);
-		// Reconnect Link 7, starting WTR timer.
-		//    In the process the LAG moves to Aggregator b02:201 in Bridge 2.
+		// Reconnect Link 7, taking over LAG when WTR timer expires.
 
 
 
