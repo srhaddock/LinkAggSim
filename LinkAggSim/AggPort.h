@@ -86,7 +86,9 @@ private:
 	bool enableLongLacpduXmit;
 	bool longLacpduXmit;
 	int currentWhileLongLacpTimer;
-	int waitToRestoreTime;     // MuxSM:  Should be 0 or WTRLimit (special cases) or time in seconds with 250ms resolution
+	int waitToRestoreTime;     
+	bool wtrRevertiveMode;
+	bool wtrRevertOK;
 	unsigned short adminLinkNumberID;
 	unsigned short LinkNumberID;
 	unsigned short partnerLinkNumberID;
@@ -159,8 +161,8 @@ public:
 	void set_aAggPortLinkNumberID(unsigned short link);
 	unsigned short get_aAggPortLinkNumberID();
 	unsigned short get_aAggPortOperLinkNumberID();    // not in standard
-	void set_aAggPortWTRTime(int time);
-	int get_aAggPortWTRTime();
+	void set_aAggPortWTRTime(unsigned short wtr);
+	unsigned short get_aAggPortWTRTime();
 	void set_aAggPortProtocolDA(unsigned long long addr);
 	unsigned long long get_aAggPortProtocolDA();
 

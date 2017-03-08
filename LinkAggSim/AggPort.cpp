@@ -64,6 +64,8 @@ AggPort::AggPort(unsigned char version, unsigned short systemNum, unsigned short
 	enableLongLacpduXmit = true;
 	longLacpduXmit = true;
 	waitToRestoreTime = 0;
+	wtrRevertiveMode = true;
+	wtrRevertOK = true;
 	adminLinkNumberID = (portNum & 0x00ff) + 1;      // Add 1 because portNum starts at zero which is reserved for "no link"
 	LinkNumberID = adminLinkNumberID;
 	partnerLinkNumberID = adminLinkNumberID;
@@ -108,6 +110,7 @@ void AggPort::reset()
 
 	// Reset Selection Logic variables
 	Ready = false;                   // Set by Selection;          Reset by: Selection;         Used by: MuxSM
+	wtrRevertOK = true;
 	// TODO: clearing association with an Aggregator does not remove port from that aggregator's lagPort list (may be problematic if not all of LinkAgg is reset)
 	actorPortAggregatorIdentifier = 0;                                // The aggregatorIdentifier to which this Aggregation Port is attached.
 	actorPortAggregatorIndex = 0;                                     // The index of the Aggregator to which this Aggregation Port is attached.
@@ -356,14 +359,24 @@ unsigned long long AggPort::get_aAggPortProtocolDA()
 	return (lacpDestinationAddress);
 }
 
-void AggPort::set_aAggPortWTRTime(int time)
+void AggPort::set_aAggPortWTRTime(unsigned short wtr)
 {
-	waitToRestoreTime = time;
+	waitToRestoreTime = wtr & 0x7fff;
+	wtrRevertiveMode = ((wtr & 0x8000) == 0);
+	if (SimLog::Debug > 4)
+	{
+		SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << actorSystem.addrMid
+			<< ":" << actorPort.num << " setting WTR to 0x" << wtr << dec
+			<< " so WTR_Time = " << waitToRestoreTime << " and WTR_Revertive_Mode = " << wtrRevertiveMode << endl;
+	}
 }
 
-int AggPort::get_aAggPortWTRTime()
+unsigned short AggPort::get_aAggPortWTRTime()
 {
-	return (waitToRestoreTime);
+	unsigned short wtr = (unsigned short)waitToRestoreTime;
+	if (!wtrRevertiveMode) 
+		wtr &= 0x8000;
+	return (wtr);
 }
 
 void AggPort::set_aAggPortEnableLongPDUXmit(bool enable)

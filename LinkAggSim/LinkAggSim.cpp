@@ -106,7 +106,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	//
 
 	// basicLagTest(Devices);
-	preferredAggregatorTest(Devices);
+	// preferredAggregatorTest(Devices);
 	// lagLoopbackTest(Devices);
 	// nonAggregatablePortTest(Devices);
 	// limitedAggregatorsTest(Devices);
@@ -1184,28 +1184,120 @@ void waitToRestoreTest(std::vector<unique_ptr<Device>>& Devices)
 			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
 		}
 		// Reconnect Links 2 and 3, starting WTR timers.
+		// Links 2 and 3 rejoin about time 255
 
 		if (SimLog::Time == start + 230)
 		{
 			Mac::Disconnect((Devices[0]->pMacs[0]));
 		}
-		// Disconnect Link 3, allowing Links 2 and 3 to immediately rejoin.
+		// Disconnect Link 1.
 
 		if (SimLog::Time == start + 250)
 		{
 			Mac::Connect((Devices[0]->pMacs[0]), (Devices[3]->pMacs[0]), 5);
 		}
-		// Reconnect Link 1.
+		// Reconnect Link 1, starting WTR timer.
+		// Link 1 rejoins about time 290
 
 
-		if (SimLog::Time == start + 500)
+		if (SimLog::Time == start + 300)
 			Mac::Disconnect((Devices[0]->pMacs[6]));
 		// Link 7 goes down allowing Link 8 to take over the Aggregator and come up with Bridge 2.
 
-		if (SimLog::Time == start + 600)
+		if (SimLog::Time == start + 350)
 			Mac::Connect((Devices[0]->pMacs[6]), (Devices[1]->pMacs[6]), 5);
 		// Reconnect Link 7, taking over LAG when WTR timer expires.
 
+		if (SimLog::Time == start + 400)
+			Mac::Disconnect((Devices[0]->pMacs[7]));
+		// Link 8 goes down, to no effect.
+
+		if (SimLog::Time == start + 450)
+			Mac::Connect((Devices[0]->pMacs[7]), (Devices[2]->pMacs[7]), 5);
+		// Reconnect Link 8, still no effect.
+
+		// So have links 1, 2, and 3 between bridge 0 and end station 3,
+		//   and link 7 between bridge 0 and 1, with link 8 having no available aggregators on bridge 0.
+
+		if (SimLog::Time == start + 500)
+		{	// Set waitToRestoreTime of all AggPorts in Bridge 0 to 30 with non-revertive mode
+			for (auto pPort : dev0Lag.pAggPorts)
+			{
+				pPort->set_aAggPortWTRTime(30 | 0x8000);
+			}
+			Mac::Disconnect((Devices[0]->pMacs[1]));
+			Mac::Disconnect((Devices[0]->pMacs[2]));
+		}
+		// Links 2 and 3 go down leaving just Link 1 in LAG between Bridge 0 and End Station 3.
+		// AggPorts b00:101 and b00:102 set non-revertive
+
+		if (SimLog::Time == start + 515)
+		{
+			Mac::Connect((Devices[0]->pMacs[1]), (Devices[3]->pMacs[1]), 5);
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
+		}
+		// Reconnect Links 2 and 3, starting WTR timers.
+
+		if (SimLog::Time == start + 520)
+		{
+			Mac::Disconnect((Devices[0]->pMacs[2]));
+		}
+		// Link 3 goes down again.
+
+		if (SimLog::Time == start + 525)
+		{
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
+		}
+		// Reconnect Link 3, re-starting WTR timer.
+
+		// Links 2 and 3 do not re-join because non-revertive
+
+		if (SimLog::Time == start + 600)
+		{
+			Mac::Disconnect((Devices[0]->pMacs[1]));
+			Mac::Disconnect((Devices[0]->pMacs[2]));
+		}
+		// Links 2 and 3 go down so still have just Link 1 in LAG between Bridge 0 and End Station 3.
+
+		if (SimLog::Time == start + 615)
+		{
+			Mac::Connect((Devices[0]->pMacs[1]), (Devices[3]->pMacs[1]), 5);
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[3]->pMacs[2]), 5);
+		}
+		// Reconnect Links 2 and 3, starting WTR timers.
+
+		if (SimLog::Time == start + 630)
+		{
+			Mac::Disconnect((Devices[0]->pMacs[0]));
+		}
+		// Disconnect Link 1, setting non-revertive.
+		// Now all links are non-revertive so all get set to revertive, but link 1 set non-revertive
+		//    again because it is still down.
+		// Links 2 and 3 come up around time 655.
+
+		if (SimLog::Time == start + 650)
+		{
+			Mac::Connect((Devices[0]->pMacs[0]), (Devices[3]->pMacs[0]), 5);
+		}
+		// Reconnect Link 1, starting WTR timer.
+		// Link 1 still non-revertive, so does not become active (i.e. not sync, collecting, or distributing).
+
+
+		if (SimLog::Time == start + 700)
+			Mac::Disconnect((Devices[0]->pMacs[6]));
+		// Link 7 goes down allowing Link 8 to take over the Aggregator and come up with Bridge 2.
+
+		if (SimLog::Time == start + 750)
+			Mac::Connect((Devices[0]->pMacs[6]), (Devices[1]->pMacs[6]), 5);
+		// Reconnect Link 7, to no effect because AggPort b00:106 is non-revertive.
+
+		if (SimLog::Time == start + 800)
+			Mac::Disconnect((Devices[0]->pMacs[7]));
+		// Link 8 goes down, causing both AggPorts b00:106 and b00:107 to be set revertive, and Link 7 comes up.
+
+		if (SimLog::Time == start + 850)
+			Mac::Connect((Devices[0]->pMacs[7]), (Devices[2]->pMacs[7]), 5);
+		// Reconnect Link 8, no effect.
 
 
 		if (SimLog::Time == start + 990)

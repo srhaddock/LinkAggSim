@@ -26,16 +26,6 @@ void AggPort::LacpSelection::resetSelection(AggPort& port)
 {
 
 }
-
-/*
-void LinkAgg::LacpSelection::runSelection()
-{
-	for (unsigned short i = 0; i < pAggPorts.size(); i++)              // For each Aggregation Port:
-	{
-		runSelection(*pAggPorts[i], true);
-	}
-}
-
 /**/
 
 void LinkAgg::LacpSelection::adminAggregatorUpdate(std::vector<shared_ptr<AggPort>>& pAggPorts, std::vector<shared_ptr<Aggregator>>& pAggregators)
@@ -154,8 +144,7 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				*   Do we want to claim the aggregator even if this port is not operational if no other ports on it are operational?
 				*/
 				if (allowableAggregator(*pAggPorts[px], *pAggregators[px]) &&    // If preferred aggregator has matching key
-					pAggPorts[px]->PortEnabled)                                  //   and the port is operational
-					//TODO:  add WTR test
+					pAggPorts[px]->PortEnabled && pAggPorts[px]->wtrRevertOK)    //   and the port is operational and revertive
 				{
 					if (SimLog::Debug > 8)
 					{
@@ -172,7 +161,7 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 						clearAggregator(*pAggregators[chosenAggregatorIndex], pAggPorts);  //    Then kick ports off that aggregator
 						                                                                   //      so they will later re-join on this aggregator
 					}
-					chosenAggregatorIndex = px;                                // Make preferred aggregator the chosen aggregator                          
+					chosenAggregatorIndex = px;                                //     Make preferred aggregator the chosen aggregator                          
 				}
 				if (SimLog::Debug > 7) SimLog::logFile << "  ... " << chosenAggregatorIndex;
 				/*
@@ -186,21 +175,28 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				/**/
 				if (chosenAggregatorIndex >= pAggregators.size() &&            // If have not yet chosen an aggregator
 					pAggPorts[px]->PortEnabled)                                //   and the port is operational
-					//TODO:  add WTR test
 				{
 					if (allowableAggregator(*pAggPorts[px], *pAggregators[px]) &&    // Then if preferred aggregator has matching key
-						!activeAggregator(*pAggregators[px], pAggPorts))             //   and own aggregator has no active ports
-						//TODO:  or put WTR test here?
+						!activeAggregator(*pAggregators[px], pAggPorts))             //   and preferred aggregator has no active ports
 					{
 						clearAggregator(*pAggregators[px], pAggPorts);               //     Then kick other ports (if any) off preferred aggregator
-						chosenAggregatorIndex = px;                                  //       and make preferred aggregrator the chosen aggregator
+						pAggPorts[px]->wtrRevertOK = true;                           //     Port becomes revertive if no active ports on preferred aggregator
+						chosenAggregatorIndex = px;                                  //     Make preferred aggregrator the chosen aggregator
 					}
 					else //TODO:  should I put in a bias toward a previous aggregator, or go right to choosing first available aggregator?
 					{                                                          // Otherwise look for another aggregator with no active ports
-						chosenAggregatorIndex = findAvailableAggregator(*pAggPorts[px], pAggPorts, pAggregators);
-						if (chosenAggregatorIndex < pAggregators.size())           //   If found another aggregator
+						unsigned short possibleAggregatorIndex = findAvailableAggregator(*pAggPorts[px], pAggPorts, pAggregators);
+						if (possibleAggregatorIndex < pAggregators.size())             //   If found another aggregator
 						{
-							clearAggregator(*pAggregators[chosenAggregatorIndex], pAggPorts);  //     Then kick other ports (if any) off that aggregator
+							if (pAggPorts[px]->wtrRevertOK)                            //       and this port is revertive
+							{
+								chosenAggregatorIndex = possibleAggregatorIndex;       //       Then choose that aggregator
+								clearAggregator(*pAggregators[chosenAggregatorIndex], pAggPorts);  //     Then kick other ports (if any) off that aggregator
+							}
+							else
+							{                                                          //       Otherwise set this port to revertive, so next cycle can compete 
+								pAggPorts[px]->wtrRevertOK = true;                     //           with any current ports that will also get set to revertive
+							}
 						}
 					}
 
@@ -296,6 +292,7 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		int collPortsInLAG = 0;
 		int distPortsInLAG = 0;
 		pAgg->aggregatorReady = true;
+		bool aggregatorActive = activeAggregator(*pAgg, pAggPorts);
 
 		for (auto lagPortIndex : pAgg->lagPorts)    // Walk through all AggPorts on Aggregator
 			{
@@ -312,6 +309,9 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				// 	(port.ReadyN && (port.portSelected == AggPort::selectedVals::SELECTED)));
 				pAgg->aggregatorReady &= (port.actorAttached ||
 					((port.portSelected == AggPort::selectedVals::SELECTED) && (port.waitWhileTimer == 0)));
+
+				if (!aggregatorActive && port.PortEnabled)   // If aggregator is not active but has enabled ports
+					port.wtrRevertOK = true;                 //    Then set those ports to revertive
 			}
 //		}
 		pAgg->receiveState = (collPortsInLAG > 0);           //TODO:  receiveState is not used anywhere and should be removed
@@ -462,9 +462,10 @@ bool LinkAgg::LacpSelection::activeAggregator(Aggregator& agg,
 {
 	bool activePorts = false;
 
-	for (auto lagPortIndex : agg.lagPorts)                  // walk through all ports on this Aggregator
+	for (auto lagPortIndex : agg.lagPorts)         // walk through all ports on this Aggregator
 	{
-		activePorts |= (pAggPorts[lagPortIndex]->PortEnabled);         // Aggregator is active if any port on Aggregator is enabled
+		activePorts |= (pAggPorts[lagPortIndex]->PortEnabled && pAggPorts[lagPortIndex]->wtrRevertOK);         
+		                                           //     Aggregator is active if any port on Aggregator is enabled and revertive
 	}
 
 	return (activePorts);

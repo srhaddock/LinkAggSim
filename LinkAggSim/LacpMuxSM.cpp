@@ -122,7 +122,7 @@ bool AggPort::LacpMuxSM::stepMuxSM(AggPort& port)
 	MuxSmStates nextMuxSmState = MuxSmStates::NO_STATE;
 	bool transitionTaken = false;
 
-	bool portGoodToGo = port.actorAttached && port.PortEnabled && (port.waitToRestoreTimer == 0);
+	bool portGoodToGo = port.actorAttached && port.PortEnabled && (port.waitToRestoreTimer == 0) && port.wtrRevertOK;
 	// Global transitions:
 	if (port.portSelected != selectedVals::SELECTED)
 	{
@@ -341,7 +341,10 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterAttachedWtr(AggPort& po
 	if ((SimLog::Debug > 3))
 	{
 		SimLog::logFile << "Time " << SimLog::Time << hex << ":  *** Port " << port.actorSystem.addrMid << ":" << port.actorPort.num
-			<< " is ATTACHED_WTR for Aggregator " << port.actorPortAggregatorIdentifier << "  ***" << dec << endl;
+			<< " is ATTACHED_WTR for Aggregator " << port.actorPortAggregatorIdentifier;
+		if (!port.wtrRevertiveMode)
+			SimLog::logFile << " (non-revertive) ";
+		SimLog::logFile << "  ***" << dec << endl;
 	}
 
 	port.actorOperPortState.sync = false;
@@ -359,6 +362,7 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterAttachedWtr(AggPort& po
 		disableCollecting(port);
 	}
 	port.waitToRestoreTimer = port.waitToRestoreTime;
+	port.wtrRevertOK = port.wtrRevertiveMode;
 	port.NTT = true;
 
 	return (MuxSmStates::ATTACHED_WTR);
