@@ -106,14 +106,14 @@ int _tmain(int argc, _TCHAR* argv[])
 	//
 
 	// basicLagTest(Devices);
-	// preferredAggregatorTest(Devices);
+	preferredAggregatorTest(Devices);
 	// lagLoopbackTest(Devices);
 	// nonAggregatablePortTest(Devices);
 	// limitedAggregatorsTest(Devices);
 	// dualHomingTest(Devices);
 	// axbkHierarchicalLagTest(Devices);
-	// distributionTest(Devices);
-	waitToRestoreTest(Devices);
+	distributionTest(Devices);
+	// waitToRestoreTest(Devices);
 
 	//
 	// Clean up devices.

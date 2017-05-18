@@ -363,7 +363,7 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterAttachedWtr(AggPort& po
 	}
 	port.waitToRestoreTimer = port.waitToRestoreTime;
 	port.wtrRevertOK = port.wtrRevertiveMode;
-	port.NTT = true;
+	port.NTT = true;                                  // Not in standard.  Does it make a difference since !Port_Enabled?
 
 	return (MuxSmStates::ATTACHED_WTR);
 }
