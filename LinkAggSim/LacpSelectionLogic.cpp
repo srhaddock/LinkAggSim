@@ -101,7 +101,8 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		*/
 		if ((pAggPorts[px]->portSelected == AggPort::selectedVals::UNSELECTED) && !pAggPorts[px]->actorAttached
 			&& !pAggPorts[px]->changeActorOperDist && !pAggPorts[px]->Ready)
-			// New mux machine added the !Ready term to above.  This is redundant with !actorAttached if qualified with UNSELECTED.
+			// New mux machine added the !Ready term to above, but shouldn't hurt with old mux.  
+			//    This is redundant with !actorAttached if qualified with UNSELECTED.
 			//    If not qualified with UNSELECTED (i.e. allow selection logic to change selected aggregator while wait_while timer
 			//    running) then need the !Ready term so that don't also allow selected aggregator to change in the ATTACH state.
 		{
@@ -234,8 +235,9 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				// Should be safe to add to list without checking to see if it is already on list
 				pAggPorts[px]->actorPortAggregatorIndex = chosenAggregatorIndex;                           // Update the selected aggregator index for this port 
 				pAggPorts[px]->actorPortAggregatorIdentifier = pAggregators[chosenAggregatorIndex]->aggregatorIdentifier;
-				// For new Mux, start wait_while_timer from here rather than in Mux machine
-				pAggPorts[px]->waitWhileTimer = AggPort::AggregateWaitTime;         // Wait a little to see if other ports are attaching 
+				
+				if (pAggPorts[px]->actorLacpVersion > 1)         // For new Mux, start wait_while_timer from here rather than in Mux machine
+					pAggPorts[px]->waitWhileTimer = AggPort::AggregateWaitTime;         // Wait a little to see if other ports are attaching 
 
 				/*
 				*  Would set portSelected to STANDBY instead of SELECTED if there was some condition that prevented the port from attaching
@@ -305,10 +307,17 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 
 				// Set aggregatorReady if all ports on Aggregator are either already attached or are selected and wait_while expired
 				// For new mux, replace the following with a test of actorAttached and wait_while_timer expired
-				// pAgg->aggregatorReady &= (port.actorOperPortState.sync ||  //TODO:  should this test actorAttached rather than actor.sync ?
-				// 	(port.ReadyN && (port.portSelected == AggPort::selectedVals::SELECTED)));
-				pAgg->aggregatorReady &= (port.actorAttached ||
-					((port.portSelected == AggPort::selectedVals::SELECTED) && (port.waitWhileTimer == 0)));
+				if (port.actorLacpVersion == 1)
+				{
+					pAgg->aggregatorReady &= (port.actorOperPortState.sync ||  //TODO:  should this test actorAttached rather than actor.sync ?
+					 	(port.ReadyN && (port.portSelected == AggPort::selectedVals::SELECTED)));
+				}
+				else
+				{
+					pAgg->aggregatorReady &= (port.actorAttached ||      // this could be changed to just check port.Ready instead of port.actorAttached
+						((port.portSelected == AggPort::selectedVals::SELECTED) && (port.waitWhileTimer == 0)));
+				}
+
 
 				if (!aggregatorActive && port.PortEnabled)   // If aggregator is not active but has enabled ports
 					port.wtrRevertOK = true;                 //    Then set those ports to revertive
@@ -319,9 +328,12 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 
 		for (auto lagPortIndex : pAgg->lagPorts)    // Walk through all AggPorts on Aggregator again
 		{
+			AggPort& port = *(pAggPorts[lagPortIndex]);
+
+//			port.Ready = pAgg->aggregatorReady;
 			if (pAgg->aggregatorReady)                   // If aggregator is ready then set Ready of all AggPorts
-				pAggPorts[lagPortIndex]->Ready = true;   //    Note this structure will not clear AggPort Ready when !aggregatorReady
-			                                             //    because with new Mux machine Ready only cleared when enter DETACHED
+				port.Ready = true;                       //    Note this structure will not clear AggPort Ready when !aggregatorReady
+				                                         //    because Ready only cleared when enter DETACHED
 			                                             // Could also get rid of pAgg->aggregatorReady and just make it a local Boolean
 		}
 		/**/

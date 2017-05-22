@@ -160,7 +160,7 @@ AggPort::LacpRxSM::RxSmStates AggPort::LacpRxSM::enterExpired(AggPort& port)
 		port.actorOperPortState.expired = true;
 		// seems like should set NTT here so partner knows using short timeout and may soon default
 		if (port.actorLacpVersion >= 2)                     // Added in AX-Cor-1, but no reason it could not have been in v1
-		{
+		{    // If don't put in v1 then when link disconnected and reconnected it won't come up until Periodic timer at actor or partner sets NTT.
 			port.NTT = true;
 			if (SimLog::Debug > 6)
 			{

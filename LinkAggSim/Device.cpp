@@ -137,7 +137,11 @@ void Device::createBridge(unsigned short type)
 	unique_ptr<Bridge> pBridge = make_unique<Bridge>(devNum, sysNum, nPorts);  // Make a Bridge with a BridgePort for each Mac
 	pBridge->vlanType = type;							               // Set as MAC, C-VLAN, or S-VLAN Bridge
 
-	unique_ptr<LinkAgg> pLag = make_unique<LinkAgg>();
+	unsigned char LacpVersion = 2;
+	// if (devNum == 0) 
+	//	 LacpVersion = 1;  //  Kludge to make first bridge LACPv1
+	
+	unique_ptr<LinkAgg> pLag = make_unique<LinkAgg>(devNum, LacpVersion);
 
 	for (unsigned short i = 0; i < nPorts; i++)    // For each Mac:
 	{
