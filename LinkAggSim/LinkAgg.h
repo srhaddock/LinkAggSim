@@ -38,8 +38,20 @@ public:
 	void run(bool singleStep);
 
 private:
+	void resetCSDC();
+	void runCSDC();
+	void updatePartnerDistributionAlgorithm(AggPort& port);
+	void updateMask(Aggregator& agg);
+	void updateActorDistributionAlgorithm(Aggregator& thisAgg);
+	void updatePartnerAdminDistributionAlgorithm(Aggregator& thisAgg);
+	void compareDistributionAlgorithms(Aggregator& thisAgg);
+	void updateActiveLinks(Aggregator& thisAgg);
+	void updateConversationPortVector(Aggregator& thisAgg);
+	void updateConversationMasks(Aggregator& thisAgg);
+	void updateAggregatorOperational(Aggregator& thisAgg);
+
 	void updateAggregatorStatus();
-	void updateConversationLinkMap(Aggregator& thisAgg);
+	void updateConversationLinkVector(Aggregator& thisAgg);
 	void linkMap_EvenOdd(Aggregator& thisAgg);
 	void linkMap_ActiveStandby(Aggregator& thisAgg);
 	void linkMap_EightLinkSpread(Aggregator& thisAgg);

@@ -94,10 +94,10 @@ private:
 	unsigned short partnerLinkNumberID;
 	std::bitset<4096> compOperConversationMask;
 	std::bitset<4096> portOperConversationMask;
+	std::bitset<4096> distributionConversationMask;
 	std::bitset<4096> collectionConversationMask;
 	std::bitset<4096> partnerAdminConversationMask;
 	std::bitset<4096> partnerOperConversationMask;
-	bool changeActorOperDist;
 	bool actorPartnerSync;
 	bool partnerActorPartnerSync;
 	bool actorDWC;
@@ -113,10 +113,12 @@ private:
 	portAlgorithms actorOperPortAlgorithm;
 	portAlgorithms partnerOperPortAlgorithm;
 
+	bool changeActorDistributing;         // Signal that actor.distributing has changed and Aggregator Operationl may need to change
 	bool changePartnerOperDistAlg;    // Signal from RxSM or MuxSM that a Partner distribution algorithm value has changed
 	bool changeActorAdmin;            // Signals that management has changed an Aggregation Port ActorAdmin value
 	bool changePartnerAdmin;          // Signals that management has changed an Aggregation Port PartnerAdmin value
 	bool changeAdminLinkNumberID;     // Signals that management has changed the Aggregaton Port Link Number
+	bool changePortLinkState;
 
 public:
 	/*

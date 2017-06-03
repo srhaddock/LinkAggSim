@@ -58,23 +58,26 @@ int  AggPort::LacpRxSM::run(AggPort& port, bool singleStep)
 
 bool AggPort::LacpRxSM::stepRxSM(AggPort& port)
 	{
+		// This first section reacts to management changes to admin variables.  Not clear this really belongs in RxSM,
+		//   but it needs to be done somewhere that gets executed per-port, and probably at start of runLACP
+		//   Could move to an adminAggPortUpdate that immediately follows call to adminAggregatorUpdate.
+		if (port.changeActorAdmin)
+		{
+			port.changeActorAdmin = false;
+			actorAdminChange(port);
+		}
+		if (port.changeAdminLinkNumberID)
+		{
+			port.changeAdminLinkNumberID = false;                            // clear flag
+			updateLinkNumber(port);                                          // update actor oper Link Number
+		}
+
+		// Start of "real" RxSM
 		RxSmStates nextRxSmState = RxSmStates::NO_STATE;
 		bool transitionTaken = false;
 
 		port.PortEnabled = port.pIss->getOperational();
-		if (port.changeActorAdmin)
-		{
-			actorAdminChange(port);
-			port.changeActorAdmin = false;
-		}
-		if (port.changeAdminLinkNumberID)
-		{
-			if (port.actorOperPortState.defaulted)                           // if currently using defaults
-				port.partnerLinkNumberID = port.adminLinkNumberID;           //   then partner Link Number is same as actor admin
-			updateLinkNumber(port);                                          // update actor oper Link Number
-			port.changeAdminLinkNumberID = false;                            // clear flag
-		}
-		
+
 		bool globalTransition = (port.RxSmState != RxSmStates::PORT_DISABLED || port.partnerOperPortState.sync) && !port.PortEnabled && !port.PortMoved;
 
 		if (globalTransition)
@@ -316,6 +319,12 @@ void AggPort::LacpRxSM::recordPdu(AggPort& port, const Lacpdu& rxLacpdu)
 			// Only need to record v2 defaults if actor version changed to 1 or partner version changed to 1.
 			//    Doing it on every received LACPDU (when actor or partner is version 1) is inefficient. 
 			recordVersion2Defaults(port);
+
+			port.partnerLinkNumberID = port.adminLinkNumberID;
+// TODO: NewUpdateMask
+//NewUpdateMask			recordDefaultConversationMask(port);
+//NewUpdateMask			if (port.actorOperPortState.collecting)
+//NewUpdateMask				agg.changeLinkState = true;
 		}
 		port.partnerLacpVersion = rxLacpdu.VersionNumber;  
 	}
@@ -379,7 +388,7 @@ void AggPort::LacpRxSM::recordVersion2Defaults(AggPort& port)
 		port.partnerOperConversationLinkListDigest.fill(0);
 		port.partnerOperConversationServiceMappingDigest.fill(0);
 		port.partnerOperConversationMask = port.partnerAdminConversationMask;
-		port.collectionConversationMask = port.partnerAdminConversationMask;    //TODO: is this appropriate here ?
+//		port.collectionConversationMask = port.partnerAdminConversationMask;    //TODO: is this appropriate here ?
 		port.actorPartnerSync = false;   //TODO: Default to false even if setting both masks to same value?
 		port.partnerActorPartnerSync = true;  // Not in standard
 		port.partnerDWC = false;              // Not in standard
@@ -419,70 +428,55 @@ void AggPort::LacpRxSM::recordConversationPortDigestTlv(AggPort& port, const Lac
 	{
 		if (rxLacpdu.portConversationIdDigestTlv)  // if recv'd TLV 
 		{
-			port.partnerLinkNumberID = rxLacpdu.linkNumberID;   // store new partner link number
+			if (port.partnerLinkNumberID != rxLacpdu.linkNumberID)
+			{
+				port.partnerLinkNumberID = rxLacpdu.linkNumberID;   // store new partner link number
+				port.changePortLinkState |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));
+				//       if link active (and will stay active) then need to update aggregator value
+			}
+
 			if (port.partnerOperConversationLinkListDigest != rxLacpdu.actorConversationLinkListDigest)  // if partner digest changed
 			{
 				port.partnerOperConversationLinkListDigest = rxLacpdu.actorConversationLinkListDigest;   //    then store new value
-				if (port.actorOperPortState.collecting)       //  If collecting when change to new partner digest 
-				{
-					port.changePartnerOperDistAlg = true;     //       then need to update aggregator value
-				}
+				port.changePartnerOperDistAlg |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));    
+					//       if link active (and will stay active) then need to update aggregator value
 			}
 		}
 		else      // if no TLV (even though partner is v2) then set to defaults
 		{
-			port.partnerLinkNumberID = port.adminLinkNumberID;   // store default link number
+			if (port.partnerLinkNumberID != port.adminLinkNumberID)
+			{
+				port.partnerLinkNumberID = port.adminLinkNumberID;   // store default link number
+				port.changePortLinkState |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));
+				//       if link active (and will stay active) then need to update aggregator value
+			}
+
 			if (!digestIsNull(port.partnerOperConversationLinkListDigest))  // if partner digest changing to default
 			{
 				port.partnerOperConversationLinkListDigest.fill(0);         //    then store new value
-				if (port.actorOperPortState.collecting)       //  If collecting when change to new partner digest 
-				{
-					port.changePartnerOperDistAlg = true;     //       then need to update aggregator value
-				}
+				port.changePartnerOperDistAlg |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));
+				//       if link active (and will stay active) then need to update aggregator value
 			}
 		}
-		updateLinkNumber(port);
 }
 
 void AggPort::LacpRxSM::updateLinkNumber(AggPort& port)
 {
-	if (port.actorOperPortState.defaulted)                           // if currently using defaults
+	if (port.actorOperPortState.defaulted ||                         // if currently using defaults
+		(port.partnerLacpVersion == 1))                              //   or partner is version 1
+	{
 		port.partnerLinkNumberID = port.adminLinkNumberID;           //   then partner Link Number is same as actor admin
-	unsigned short negotiatedLinkNumberID = port.adminLinkNumberID;  // Assume going to use actor's link number
-	if (((port.actorSystem.id > port.partnerOperSystem.id) || ((port.actorSystem.id == port.partnerOperSystem.id) &&
-		(port.actorPort.id > port.partnerOperPort.id))))             //     unless partner has priority
-		//TODO:  Testing port ID is not yet in standard, but is important for loopback where system ID's are the same
-		//Note:  This can result link number = 0 if partnerLinkNumberID = 0.  In this case no Conversation IDs will map to this link,
-		//    but better than ending up with different actor/partner numbers.
-	{
-		negotiatedLinkNumberID = port.partnerLinkNumberID;           //     and then use partner's link number
-		//TODO: How do you verify that don't end up with duplicate LinkNumberID on the same aggregator?
-		//TODO: OK to overwrite LinkNumberID if digest doesn't match (may be using different set of link numbers) ?
-		//        Could get duplicate LinkNumber whether or not overwrite if digest doesn't match
 	}
-	//TODO:  check standard and code reverts to actor's link number when change partner
 
-	if (port.LinkNumberID != negotiatedLinkNumberID)    // If link number is going to change
+	if (port.actorOperPortState.collecting)            //   If collecting when link number changes
 	{
-		if (port.actorOperPortState.distributing)       //   If distributing when link number changes
-		{
-			port.changeActorOperDist = true;            //       then need to update list of active links
-		}
-		port.NTT = true;                                //   Tell partner link number changed
-		if (SimLog::Debug > 6)
-		{
-			SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << port.actorSystem.addrMid
-				<< ":" << port.actorPort.num << " NTT: Link Number changing to  " << dec << negotiatedLinkNumberID << endl;
-		}
+		port.changePortLinkState |= (port.portSelected == selectedVals::SELECTED);  // then if SELECTED then let updateAggregationLinks handle it
+		                                                                            //   otherwise disableCollectingDistributing will handle it
 	}
-	port.LinkNumberID = negotiatedLinkNumberID;         // Save link number
-
-	if (port.partnerLinkNumberID != port.LinkNumberID)
+	else                                               //   If not collecting
 	{
-		//TODO:  report to management
-		//TODO:  what do you do operationally if difference in Link Numbers persists?
-		//    Should this test be part of qualifying partner.sync?
-		//TODO: In Cor-1 if actor.distributing and partner.distributing then also set differentPortConversationDigests
+		port.LinkNumberID = port.adminLinkNumberID;                                 // then set new admin value to new operational value
+		port.NTT |= port.actorOperPortState.sync;                                   //   and set NTT if actor.sync
 	}
 }
 
@@ -531,7 +525,7 @@ void AggPort::LacpRxSM::recordReceivedConversationMaskTlv(AggPort& port, const L
 			port.partnerDWC = false;
 			port.partnerPSI = false;
 			port.partnerOperConversationMask = port.partnerAdminConversationMask;
-			port.collectionConversationMask = port.partnerAdminConversationMask;    //TODO: is this appropriate here ?
+//			port.collectionConversationMask = port.partnerAdminConversationMask;    //TODO: is this appropriate here ?
 			// Note that since not saving fact that default values are used since this TLV was missing from the received LACPDU,
 			//   an administrative change to partnerAdminConversationMask will not be recognized until the next LACPDU is received.
 			port.actorPartnerSync = false;   //TODO: Default to false even if setting both masks to same value?
@@ -541,13 +535,5 @@ void AggPort::LacpRxSM::recordReceivedConversationMaskTlv(AggPort& port, const L
 	}
 	/**/
 
-	/*            Incorporated this into recordPDU (and recordDefault)
-	private void recordVersionNumber(Lacpdu rxLacpdu)
-	{
-		partnerLacpVersion = rxLacpdu.versionNumber;
-	}
-	/**/
 
-
-	/**/
 

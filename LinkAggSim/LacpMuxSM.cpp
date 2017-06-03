@@ -336,8 +336,12 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterCollecting(AggPort& por
 	else  // (port.actorLacpVersion > 1)
 	{
 		if (!port.actorOperPortState.collecting)
+		{
 			port.NTT = true;
-		enableCollecting(port);
+			enableCollecting(port);
+		}
+		else
+			disableDistributing(port);
 		// For new mux don't have to disable distributing since never pass through COLLECTING when going down,
 		//    but do need to set Sync True since may go directly from ATTACH to COLLECTING
 		// disableDistributing(port);
@@ -380,7 +384,10 @@ AggPort::LacpMuxSM::MuxSmStates AggPort::LacpMuxSM::enterCollDist(AggPort& port)
 	}
 	else  // (port.actorLacpVersion > 1)
 	{
-		enableCollectingDistributing(port);
+		if (!port.actorOperPortState.collecting)
+			enableCollectingDistributing(port);
+		else 
+			enableDistributing(port);
 		port.actorOperPortState.sync = true;
 		port.actorOperPortState.collecting = true;
 		port.actorOperPortState.distributing = true;
@@ -408,11 +415,13 @@ void AggPort::LacpMuxSM::detachMuxFromAggregator(AggPort& port)
 void AggPort::LacpMuxSM::enableCollecting(AggPort& port)
 {
 	port.changePartnerOperDistAlg = true;
+	port.changePortLinkState = true;
 }
 
 void AggPort::LacpMuxSM::disableCollecting(AggPort& port)
 {
 	// no function in simulation
+	port.changePortLinkState = true;
 }
 
 void AggPort::LacpMuxSM::enableDistributing(AggPort& port)
@@ -420,7 +429,7 @@ void AggPort::LacpMuxSM::enableDistributing(AggPort& port)
 //	if (!port.actorOperPortState.distributing)  // Don't need to test this since only one way into this state
 	// If were going to add this test would have to set distributing true after calling enableDistributing
 
-	port.changeActorOperDist = true;
+	port.changeActorDistributing = true;
 
 	if ((SimLog::Debug > 0))
 	{
@@ -435,7 +444,7 @@ void AggPort::LacpMuxSM::disableDistributing(AggPort& port)
 {
 	if (port.actorOperPortState.distributing)
 	{
-		port.changeActorOperDist = true;  
+		port.changeActorDistributing = true;  
 
 		if ((SimLog::Debug > 0))
 		{
@@ -449,8 +458,9 @@ void AggPort::LacpMuxSM::disableDistributing(AggPort& port)
 
 void AggPort::LacpMuxSM::enableCollectingDistributing(AggPort& port)
 {
-	port.changeActorOperDist = true;
+	port.changeActorDistributing = true;
 	port.changePartnerOperDistAlg = true;
+	port.changePortLinkState = true;
 
 	if ((SimLog::Debug > 0))
 	{
@@ -464,7 +474,16 @@ void AggPort::LacpMuxSM::enableCollectingDistributing(AggPort& port)
 
 void AggPort::LacpMuxSM::disableCollectingDistributing(AggPort& port)
 {
-	port.changeActorOperDist = true;  
+	port.changeActorDistributing = true;  
+
+	port.portOperConversationMask.reset();
+	port.distributionConversationMask.reset();
+	port.collectionConversationMask.reset();
+	port.actorDWC = false;
+	port.LinkNumberID = port.adminLinkNumberID;
+	port.changePortLinkState = true;
+	port.actorPartnerSync = (port.portOperConversationMask == port.partnerOperConversationMask);
+
 
 	if ((SimLog::Debug > 0))
 	{

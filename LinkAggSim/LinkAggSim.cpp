@@ -301,8 +301,18 @@ void preferredAggregatorTest(std::vector<unique_ptr<Device>>& Devices)
 		//    non-operational.  
 		//    With small values of aggregateWaitTime there is additional "bouncing" of aggregator operational.
 
+		if (SimLog::Time == start + 250)
+		{
+			LinkAgg& dev0Lag = (LinkAgg&)*(Devices[0]->pComponents[1]);  // alias to LinkAgg shim of bridge b00
+			dev0Lag.pAggPorts[1]->set_aAggPortLinkNumberID(18);          // change link number of b00:101
+		}
+
 		if (SimLog::Time == start + 300)
+		{
 			Mac::Disconnect((Devices[0]->pMacs[1]));                           // Take down first link
+			LinkAgg& dev0Lag = (LinkAgg&)*(Devices[0]->pComponents[1]);  // alias to LinkAgg shim of bridge b00
+			dev0Lag.pAggPorts[1]->set_aAggPortLinkNumberID(2);           // restore link number of b00:101
+		}
 		// Link 3 goes down and conversations immediately re-allocated to other links.
 		// AggPorts b00:102 and b00:103 remain up on Aggregator b00:201
 		if (SimLog::Time == start + 400)
@@ -927,12 +937,12 @@ void distributionTest(std::vector<unique_ptr<Device>>& Devices)
 	// Set link distribution to even-odd in all Bridge 0 Aggregators
 	for (auto& pAgg : dev0LinkAgg.pAggregators)
 	{
-	pAgg->set_ConvPortList(Aggregator::convPortLists::EVEN_ODD);
+	pAgg->set_convLinkMap(Aggregator::convLinkMaps::EVEN_ODD);
 	}
 	// Set link distribution to active-standby in all Bridge 2 Aggregators
 	for (auto& pAgg : dev2LinkAgg.pAggregators)
 	{
-	pAgg->set_ConvPortList(Aggregator::convPortLists::ACTIVE_STANDBY);
+	pAgg->set_convLinkMap(Aggregator::convLinkMaps::ACTIVE_STANDBY);
 	}
 	/**/
 
@@ -997,7 +1007,7 @@ void distributionTest(std::vector<unique_ptr<Device>>& Devices)
 
 		if (SimLog::Time == start + 500)
 		{
-			// Test Link Numbers > 7 with the "EIGHT_LINK_SPREAD" convPortList
+			// Test Link Numbers > 7 with the "EIGHT_LINK_SPREAD" convLinkMap
 			dev0LinkAgg.pAggPorts[0]->set_aAggPortLinkNumberID(17);
 			dev0LinkAgg.pAggPorts[1]->set_aAggPortLinkNumberID(25);
 
@@ -1046,8 +1056,8 @@ void distributionTest(std::vector<unique_ptr<Device>>& Devices)
 
 				//   set the digest for admin-table (should be calculated MD5 of the ConversationAdminLink map)
 				pAgg->set_aAggConversationListDigest(AdminTableDigest);
-				//   set the admin-table as the selected convPortList
-				pAgg->set_ConvPortList(Aggregator::convPortLists::ADMIN_TABLE);
+				//   set the admin-table as the selected convLinkMap
+				pAgg->set_convLinkMap(Aggregator::convLinkMaps::ADMIN_TABLE);
 			}
 
 		}

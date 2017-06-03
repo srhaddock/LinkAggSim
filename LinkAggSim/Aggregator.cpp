@@ -39,10 +39,10 @@ Aggregator::Aggregator(unsigned char version, unsigned short systemNum, unsigned
 
 	aggregatorReady = false;
 
-	selectedConvPortList = Aggregator::convPortLists::EIGHT_LINK_SPREAD;
+	selectedconvLinkMap = Aggregator::convLinkMaps::EIGHT_LINK_SPREAD;
 	actorPortAlgorithm = portAlgorithms::UNSPECIFIED;
 	actorAdminConversationLinkListDigest.fill(0);
-	actorConversationLinkListDigest = convPortListEightLinkSpreadDigest;
+	actorConversationLinkListDigest = convLinkMapEightLinkSpreadDigest;
 	actorAdminConversationServiceMappingDigest.fill(0);
 	actorConversationServiceMappingDigest.fill(0);
 	partnerAdminPortAlgorithm = portAlgorithms::UNSPECIFIED;
@@ -54,11 +54,15 @@ Aggregator::Aggregator(unsigned char version, unsigned short systemNum, unsigned
 	adminDiscardWrongConversation = adminValues::AUTO;
 	operDiscardWrongConversation = false;
 
-	changeAggregationPorts = false;
-	changeActorDistributionAlgorithm = false;
-	changePartnerDistributionAlgorithm = false;
-	changePartnerAdminDistAlg = false;
 	changeActorSystem = false;
+
+	changeActorDistAlg = false;
+	changeConvLinkList = false;
+	changePartnerAdminDistAlg = false;
+	changeDistAlg = false;
+	changeLinkState = false;
+	changeAggregationLinks = false;
+	changeCSDC = false;
 
 	//  cout << "Aggregator Constructor called." << endl;
 	//	SimLog::logFile << "Aggregator Constructor called." << endl;
@@ -102,16 +106,27 @@ void Aggregator::reset()
 
 	aggregatorReady = false;
 
+	changeActorSystem = false;
+
+	// all of the following is in resetCSDC()
 	partnerPortAlgorithm = partnerAdminPortAlgorithm;
 	partnerConversationLinkListDigest = partnerAdminConversationLinkListDigest;
 	partnerConversationServiceMappingDigest = partnerAdminConversationServiceMappingDigest;
+	differentPortAlgorithms = false;
+	differentConversationServiceDigests = false;
+	differentPortConversationDigests = false;
 	operDiscardWrongConversation = false;
+	activeLagLinks.clear();
+	conversationLinkVector.fill(0);
 
-	changeAggregationPorts = false;
-	changeActorDistributionAlgorithm = false;
-	changePartnerDistributionAlgorithm = false;
+
+	changeActorDistAlg = false;
+	changeConvLinkList = false;
 	changePartnerAdminDistAlg = false;
-	changeActorSystem = false;
+	changeDistAlg = false;
+	changeLinkState = false;
+	changeAggregationLinks = false;
+	changeCSDC = false;
 }
 
 bool Aggregator::digestIsNull(std::array<unsigned char, 16>& digest)
@@ -250,7 +265,7 @@ void Aggregator::set_aAggPortAlgorithm(Aggregator::portAlgorithms alg)
 	if (actorPortAlgorithm != alg)   // If new value is not the same as the old
 	{
 		actorPortAlgorithm = alg;                // Store new value
-		changeActorDistributionAlgorithm = true;   //   and set flag so change is processed
+		changeActorDistAlg = true;               //   and set flag so change is processed
 	}
 }
 
@@ -295,7 +310,8 @@ std::array<unsigned char, 16> Aggregator::get_aAggPartnerAdminConvServiceMapping
 void Aggregator::set_aAggAdminDiscardWrongConversation(adminValues DWC)
 {
 	adminDiscardWrongConversation = DWC;
-	changeActorDistributionAlgorithm = true;   // set flag so change is processed
+	if (!activeLagLinks.empty())               // if aggregator has any active links
+		changeDistAlg = true;                  //    then set flag to re-evaluate operational DWC
 }
 
 adminValues Aggregator::get_aAggAdminDiscardWrongConversation()
@@ -315,15 +331,17 @@ void Aggregator::set_aAggConversationAdminLink(unsigned short cid, std::list<uns
 {
 	if (cid <= 4095)                                                     // if the cid is valid then:
 	{
-		if (conversationPortList.find(cid) != conversationPortList.end())  // if map contains an entry for that cid
+		if (adminConversationLinkMap.find(cid) != adminConversationLinkMap.end())  // if map contains an entry for that cid
 		{
-			conversationPortList.erase(cid);                               //    then remove the old entry
+			adminConversationLinkMap.erase(cid);                               //    then remove the old entry
 		}
 		if (!linkNumberList.empty() && (linkNumberList.front() != 0))      // if the new entry contains at least one non-zero link number
 		{
-			conversationPortList.insert(make_pair(cid, linkNumberList));   //    then insert the new map entry
+			adminConversationLinkMap.insert(make_pair(cid, linkNumberList));   //    then insert the new map entry
 		}
-		changeActorDistributionAlgorithm = true;   //   and set flag so change is processed
+		// recalculate Digest
+		changeConvLinkList = true;                 //   and set flag so change is processed
+		changeActorDistAlg = true;                 //   and set flag so change is processed
 	}
 }
 
@@ -331,9 +349,9 @@ std::list<unsigned short> Aggregator::get_aAggConversationAdminLink(unsigned sho
 {
 	std::list<unsigned short> linkNumberList;
 	
-	if (conversationPortList.find(cid) != conversationPortList.end())  // if map contains an entry for that cid
+	if (adminConversationLinkMap.find(cid) != adminConversationLinkMap.end())  // if map contains an entry for that cid
 	{
-		linkNumberList = conversationPortList.at(cid);     //    then copy the prioritized list of link numbers for that cid
+		linkNumberList = adminConversationLinkMap.at(cid);     //    then copy the prioritized list of link numbers for that cid
 	}
 	return(linkNumberList);
 }
@@ -341,11 +359,11 @@ std::list<unsigned short> Aggregator::get_aAggConversationAdminLink(unsigned sho
 //  This function is to facilitate testing of the above get/set functions
 void Aggregator::printConversationAdminLink()
 {
-	if (conversationPortList.empty())
+	if (adminConversationLinkMap.empty())
 		SimLog::logFile << "    No entries in the Conversation Link Map" << endl;
 	else
 	{
-		for (const auto& entry : conversationPortList)
+		for (const auto& entry : adminConversationLinkMap)
 		{
 			SimLog::logFile << "    " << entry.first << ":   ";
 			for (const auto& link : entry.second)
@@ -359,7 +377,7 @@ void Aggregator::printConversationAdminLink()
 void Aggregator::set_aAggConversationListDigest(std::array<unsigned char, 16> digest)
 {
 	actorAdminConversationLinkListDigest = digest;
-	changeActorDistributionAlgorithm = true;   //   and set flag so change is processed
+	changeActorDistAlg = true;                 //   and set flag so change is processed
 }
 
 std::array<unsigned char, 16>Aggregator::get_aAggConversationListDigest()
@@ -371,7 +389,7 @@ std::array<unsigned char, 16>Aggregator::get_aAggConversationListDigest()
 
 unsigned short Aggregator::get_conversationLink(unsigned short cid)
 {
-	return (conversationLinkMap[cid]);
+	return (conversationLinkVector[cid]);
 }
 
 Aggregator::portAlgorithms Aggregator::get_aAggPartnerPortAlgorithm()
@@ -379,30 +397,31 @@ Aggregator::portAlgorithms Aggregator::get_aAggPartnerPortAlgorithm()
 	return (partnerPortAlgorithm);
 }
 
-void Aggregator::set_ConvPortList(Aggregator::convPortLists choice)
+void Aggregator::set_convLinkMap(Aggregator::convLinkMaps choice)
 {
-	selectedConvPortList = choice;
-	switch (selectedConvPortList)
+	selectedconvLinkMap = choice;
+	switch (selectedconvLinkMap)
 	{
-	case Aggregator::convPortLists::ADMIN_TABLE:
+	case Aggregator::convLinkMaps::ADMIN_TABLE:
 		actorConversationLinkListDigest = actorAdminConversationLinkListDigest;
 		break;
-	case Aggregator::convPortLists::ACTIVE_STANDBY:
-		actorConversationLinkListDigest = convPortListActiveStandbyDigest;
+	case Aggregator::convLinkMaps::ACTIVE_STANDBY:
+		actorConversationLinkListDigest = convLinkMapActiveStandbyDigest;
 		break;
-	case Aggregator::convPortLists::EVEN_ODD:
-		actorConversationLinkListDigest = convPortListEvenOddDigest;
+	case Aggregator::convLinkMaps::EVEN_ODD:
+		actorConversationLinkListDigest = convLinkMapEvenOddDigest;
 		break;
-	case Aggregator::convPortLists::EIGHT_LINK_SPREAD:
-		actorConversationLinkListDigest = convPortListEightLinkSpreadDigest;
+	case Aggregator::convLinkMaps::EIGHT_LINK_SPREAD:
+		actorConversationLinkListDigest = convLinkMapEightLinkSpreadDigest;
 		break;
 	}
-	changeActorDistributionAlgorithm = true;   //   and set flag so change is processed
+	// recalculate Digest
+	changeActorDistAlg = true;                 //   and set flag so change is processed
 }
 
-Aggregator::convPortLists Aggregator::get_ConvPortList()
+Aggregator::convLinkMaps Aggregator::get_convLinkMap()
 {
-	return (selectedConvPortList);
+	return (selectedconvLinkMap);
 }
 
 std::array<unsigned char, 16> Aggregator::get_aAggOperConversationListDigest()

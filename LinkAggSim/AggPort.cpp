@@ -31,7 +31,7 @@ AggPort::AggPort(unsigned char version, unsigned short systemNum, unsigned short
 	ReadyN = false;                  // Set by MuxSM;              Reset by: MuxSM;             Used by: Selection
 	Ready = false;                   // Set by Selection;          Reset by: Selection;         Used by: MuxSM
 	policy_coupledMuxControl = false;
-	changeActorOperDist = false;
+	changeActorDistributing = false;
 
 	pRxLacpFrame = nullptr;
 	pIss = nullptr;
@@ -80,10 +80,17 @@ AggPort::AggPort(unsigned char version, unsigned short systemNum, unsigned short
 	partnerOperConversationLinkListDigest.fill(0);
 	partnerOperConversationServiceMappingDigest.fill(0);
 
+	portOperConversationMask.reset();
+	distributionConversationMask.reset();
+	collectionConversationMask.reset();
+	partnerAdminConversationMask.reset();
+	partnerOperConversationMask.reset();
+
 	changePartnerOperDistAlg = false;
 	changeActorAdmin = false;
 	changePartnerAdmin = false;
 	changeAdminLinkNumberID = false;
+	changePortLinkState = false;
 
 	//  cout << "AggPort Constructor called." << endl;
 	//	SimLog::logFile << "AggPort Constructor called." << endl;
@@ -120,9 +127,16 @@ void AggPort::reset()
 	actorOperConversationServiceMappingDigest.fill(0);
 	actorDWC = false;
 	Ready = false;                   // Set by Selection;          Reset by: Selection;         Used by: MuxSM
-	changeActorOperDist = false;
+	changeActorDistributing = false;
 	changePartnerOperDistAlg = false;
+	changePortLinkState = false;
+
 	longLacpduXmit = true;            // controlled by LinkAgg
+
+	portOperConversationMask.reset();
+	distributionConversationMask.reset();
+	collectionConversationMask.reset();
+	partnerOperConversationMask.reset();
 
 }
 
@@ -395,6 +409,8 @@ void AggPort::set_aAggPortLinkNumberID(unsigned short link)
 	{
 		adminLinkNumberID = link;
 		changeAdminLinkNumberID = true;    // Signal RxSM that admin Link Number has changed
+//		if (actorOperPortState.collecting)    // aggregator flag set indirectly through port flag
+//			agg.changeLinkState = true;
 	}
 }
 
@@ -411,7 +427,7 @@ unsigned short AggPort::get_aAggPortOperLinkNumberID()
 void AggPort::set_aAggPortPartnerAdminConversationMask(std::bitset<4096> mask)  // No managed object for this in standard
 {
 	partnerAdminConversationMask = mask;
-	changePartnerAdmin = true;  
+	changePartnerAdmin = true;            //TODO:  should this be tied to updateMask somehow, rather than tied to PartnerAdmin LAGID changes?
 }
 
 std::bitset<4096> AggPort::get_aAggPortPartnerAdminConversationMask()

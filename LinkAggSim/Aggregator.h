@@ -20,10 +20,10 @@ limitations under the License.
 const unsigned short defaultActorKey = 0x0088;
 const unsigned short defaultPartnerKey = 0x0070;
 const unsigned short unusedAggregatorKey = 0x0911;
-static const std::array<unsigned char, 16> convPortListActiveStandbyDigest = { "ACTIVE_STANDBY " };
-static const std::array<unsigned char, 16> convPortListEvenOddDigest = { "EVEN_ODD       " };
-static const std::array<unsigned char, 16> convPortListEightLinkSpreadDigest = { "8_LINK_SPREAD  " };
-//TODO:: calculate the real MD5 signatures of the fixed conversationPortLists
+static const std::array<unsigned char, 16> convLinkMapActiveStandbyDigest = { "ACTIVE_STANDBY " };
+static const std::array<unsigned char, 16> convLinkMapEvenOddDigest = { "EVEN_ODD       " };
+static const std::array<unsigned char, 16> convLinkMapEightLinkSpreadDigest = { "8_LINK_SPREAD  " };
+//TODO:: calculate the real MD5 signatures of the fixed adminConversationLinkMaps
 
 /**/
 union portId
@@ -97,7 +97,7 @@ public:
 
 	// public LACPv2 variables
 	enum portAlgorithms { NONE = 0, UNSPECIFIED = 0x0080c200, C_VID, S_VID, I_SID, TE_SID, ECMP_FLOW_HASH };
-	enum convPortLists { ADMIN_TABLE, ACTIVE_STANDBY, EVEN_ODD, EIGHT_LINK_SPREAD };
+	enum convLinkMaps { ADMIN_TABLE, ACTIVE_STANDBY, EVEN_ODD, EIGHT_LINK_SPREAD };
 
 protected:
 	bool operational;
@@ -117,17 +117,23 @@ protected:
 
 	bool aggregatorReady;
 
-	bool changeAggregationPorts;
-	bool changePartnerDistributionAlgorithm;
-	bool changeActorDistributionAlgorithm;
-	bool changePartnerAdminDistAlg;
 	bool changeActorSystem;
+	bool changeDistributing;
+
+	bool changeActorDistAlg;                  //
+	bool changeConvLinkList;                  //
+	bool changePartnerAdminDistAlg;           //
+	bool changeDistAlg;                       //
+	bool changeLinkState;                     //
+	bool changeAggregationLinks;              //
+	bool changeCSDC;                          //
+
 
 	// private LACPv2 variables
 	adminValues adminDiscardWrongConversation;
 	bool operDiscardWrongConversation;
 	std::array<unsigned char, 16> actorAdminConversationLinkListDigest;           // Admin value set by management
-	std::array<unsigned char, 16> actorConversationLinkListDigest;                // value in use selected by selectedConvPortList
+	std::array<unsigned char, 16> actorConversationLinkListDigest;                // value in use selected by selectedconvLinkMap
 	std::array<unsigned char, 16> partnerAdminConversationLinkListDigest;         // Admin value set by management; used when actorOperPortState.defaulted
 	std::array<unsigned char, 16> partnerConversationLinkListDigest;              // value in use (default or as received from partner LACPDU)
 	std::array<unsigned char, 16> actorAdminConversationServiceMappingDigest;     // Admin value set by management 
@@ -137,13 +143,13 @@ protected:
 	portAlgorithms actorPortAlgorithm;
 	portAlgorithms partnerAdminPortAlgorithm;
 	portAlgorithms partnerPortAlgorithm;
-	std::map<unsigned short, std::list<unsigned short>> conversationPortList;      // map of lists of Link Numbers keyed by CID
+	std::map<unsigned short, std::list<unsigned short>> adminConversationLinkMap;      // map of lists of Link Numbers keyed by CID
 	bool differentConversationServiceDigests;
 	bool differentPortAlgorithms;
 	bool differentPortConversationDigests;
 	std::list<unsigned short> activeLagLinks;  // contains Link Number ID if AggPort attached and distributing, else Link Number = 0
-	std::array<unsigned short, 4096> conversationLinkMap;  // Indexed Conversation ID; contains LinkNumberID of Aggregation Port for that Conversation ID.
-	convPortLists selectedConvPortList;
+	std::array<unsigned short, 4096> conversationLinkVector;  // Indexed Conversation ID; contains LinkNumberID of Aggregation Port for that Conversation ID.
+	convLinkMaps selectedconvLinkMap;
 
 
 	static bool digestIsNull(std::array<unsigned char, 16>& digest);
@@ -199,8 +205,8 @@ public:
 	void printConversationAdminLink();
 	unsigned short get_conversationLink(unsigned short cid);
 	portAlgorithms get_aAggPartnerPortAlgorithm();
-	void set_ConvPortList(convPortLists choice);
-	convPortLists get_ConvPortList();
+	void set_convLinkMap(convLinkMaps choice);
+	convLinkMaps get_convLinkMap();
 	std::array<unsigned char, 16> get_aAggOperConversationListDigest();
 	std::array<unsigned char, 16> get_aAggPartnerOperConversationListDigest();
 

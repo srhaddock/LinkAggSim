@@ -113,7 +113,8 @@ void LinkAgg::run(bool singleStep)
 			transitions += AggPort::LacpRxSM::run(*pAggPorts[i], true);
 			transitions += AggPort::LacpMuxSM::run(*pAggPorts[i], true);
 		}
-		updateAggregatorStatus();
+//		updateAggregatorStatus();
+		runCSDC();
 
 		//TODO:  Can you aggregate ports with different LACP versions?  Do you need to test for it?  Does partner LACP version need to be in DRCPDU?
 		LinkAgg::LacpSelection::runSelection(pAggPorts, pAggregators);
@@ -173,268 +174,428 @@ void LinkAgg::run(bool singleStep)
 }
 
 
-void LinkAgg::updateAggregatorStatus()
+void LinkAgg::resetCSDC()
+{
+	for (auto pAgg : pAggregators)            // May want to wrap this in a while loop and repeat until no flags set
+	{
+		Aggregator& agg = *pAgg;
+
+		agg.partnerPortAlgorithm = agg.partnerAdminPortAlgorithm;
+		agg.partnerConversationLinkListDigest = agg.partnerAdminConversationLinkListDigest;
+		agg.partnerConversationServiceMappingDigest = agg.partnerAdminConversationServiceMappingDigest;
+
+		agg.differentPortAlgorithms = false;
+		agg.differentConversationServiceDigests = false;
+		agg.differentPortConversationDigests = false;
+
+		agg.operDiscardWrongConversation = (agg.adminDiscardWrongConversation == adminValues::FORCE_TRUE);
+
+		agg.activeLagLinks.clear();
+		agg.conversationLinkVector.fill(0);
+
+		agg.changeActorDistAlg = false;
+		agg.changeConvLinkList = false;
+		agg.changePartnerAdminDistAlg = false;
+		agg.changeDistAlg = false;
+		agg.changeLinkState = false;
+		agg.changeAggregationLinks = false;
+		agg.changeCSDC = false;
+	}
+	//TODO: verify that some per-port machine resets all conversation masks, link number, local copies of dwc.
+}
+
+void LinkAgg::runCSDC()
 {
 	for (auto pPort : pAggPorts)           // Walk through all Aggregation Ports
 	{
-		if (pPort->changeActorOperDist           // Set changeAggregationPorts as logical "or" of the changeActorOperDist flag
-//			&& ((pPort->portSelected == AggPort::selectedVals::SELECTED) || pPort->actorOperPortState.sync)
-			)
-		{
-			pAggregators[pPort->actorPortAggregatorIndex]->changeAggregationPorts = true;
-		}
-		// Don't clear changeActorOperDist yet -- will be done later.
-		//TODO:  DONE:  What action should be taken if MUX machine gets to DETACHED before changeActorOperDist is processed?
-		//   Maybe need to qualify Selection Logic with "DETACHED && !changeActorOperDist" so cannot select new aggregator
-		//   until changeActorOperDist processed on old aggregator (in which case remove checks on "SELECTED || sync").
-		//   Or maybe just move updateAggregatorStatus() before runSelection().
+		updatePartnerDistributionAlgorithm(*pPort);
+	}
+	for (auto pAgg : pAggregators)            // May want to wrap this in a while loop and repeat until no flags set
+	{
+		updateMask(*pAgg);
+	}
+}
 
-		//  If the partner distribution algorithm parameters have changed for any port that is COLLECTING on an Aggregator,
-		//     update the Aggregator's distribution algorithm parameters.
-		//     Assumes that the portOper... distribution algorithm parameters are null for any port that expects the 
-		//     Aggregator to use the partnerAdmin... values (including port that is DEFAULTED, is version 1 (?), 
-		//     or did not receive the proper V2 TLVs from the partner.
-		if (pPort->actorOperPortState.collecting)  // need to test SELECTED?
+void LinkAgg::updateMask(Aggregator& agg)
+{
+	int loop = 0;
+	do
+	{
+		if (agg.changeActorDistAlg)
 		{
-			Aggregator& agg = *(pAggregators[pPort->actorPortAggregatorIndex]);
-			if ((pPort->changePartnerOperDistAlg || agg.changePartnerAdminDistAlg) &&
-				(pPort->partnerOperPortAlgorithm == Aggregator::portAlgorithms::NONE))
-				// partnerOperPortAlgorithm will only be NONE if no LACPDUv2 exchange with partner, so use partnerAdmin values.
+			agg.changeActorDistAlg = false;
+			updateActorDistributionAlgorithm(agg);
+		}
+		else if (agg.changePartnerAdminDistAlg)
+		{
+			agg.changePartnerAdminDistAlg = false;
+			updatePartnerAdminDistributionAlgorithm(agg);
+		}
+		else if (agg.changeDistAlg)
+		{
+			agg.changeDistAlg = false;
+			compareDistributionAlgorithms(agg);
+		}
+		else if (agg.changeLinkState)
+		{
+			agg.changeLinkState = false;
+			updateActiveLinks(agg);
+		}
+		else if (agg.changeAggregationLinks)
+		{
+			agg.changeAggregationLinks = false;
+			updateConversationPortVector(agg);
+		}
+		else if (agg.changeCSDC)
+		{
+			agg.changeCSDC = false;
+			updateConversationMasks(agg);
+		}
+		else if (agg.changeDistributing)
+		{
+			agg.changeDistributing = false;
+			updateAggregatorOperational(agg);
+		}
+
+		loop++;
+	} while (loop < 10);
+
+}
+
+void LinkAgg::updatePartnerDistributionAlgorithm(AggPort& port)
+{
+	Aggregator& agg = *(pAggregators[port.actorPortAggregatorIndex]);
+
+	agg.changeDistributing |= port.changeActorDistributing;
+	port.changeActorDistributing = false;
+
+	agg.changeLinkState |= port.changePortLinkState;
+	port.changePortLinkState = false;
+
+	//  If the partner distribution algorithm parameters have changed for any port that is COLLECTING on an Aggregator,
+	//     update the Aggregator's distribution algorithm parameters.
+	//     Assumes that the portOper... distribution algorithm parameters are null for any port that expects the 
+	//     Aggregator to use the partnerAdmin... values (including port that is DEFAULTED, is version 1 (?), 
+	//     or did not receive the proper V2 TLVs from the partner.
+
+	if (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED))
+		// Need to test partner.sync and/or portOperational as well?
+	{
+		if ((port.changePartnerOperDistAlg) &&
+			(port.partnerOperPortAlgorithm == Aggregator::portAlgorithms::NONE))
+			// partnerOperPortAlgorithm will only be NONE if no LACPDUv2 exchange with partner, so use partnerAdmin values.
+		{
+			agg.partnerPortAlgorithm = agg.partnerAdminPortAlgorithm;
+			agg.partnerConversationLinkListDigest = agg.partnerAdminConversationLinkListDigest;
+			agg.partnerConversationServiceMappingDigest = agg.partnerAdminConversationServiceMappingDigest;
+			agg.changeDistAlg = true;
+			// Could optimize further processing by only setting change flag if new values differ from old values.
+			if ((SimLog::Debug > 3))
 			{
-				agg.partnerPortAlgorithm = agg.partnerAdminPortAlgorithm;
-				agg.partnerConversationLinkListDigest = agg.partnerAdminConversationLinkListDigest;
-				agg.partnerConversationServiceMappingDigest = agg.partnerAdminConversationServiceMappingDigest;
-				agg.changePartnerDistributionAlgorithm = true;
-				// Could optimize further processing by only setting change flag if new values differ from old values.
-				pPort->changePartnerOperDistAlg = false;
+				SimLog::logFile << "Time " << SimLog::Time << hex << ":  *** Port " << port.actorSystem.addrMid << ":" << port.actorPort.num
+					<< " setting default partner algorithm on Aggregator " << port.actorPortAggregatorIdentifier << "  ***" << dec << endl;
 			}
-			else if (pPort->changePartnerOperDistAlg)
+		}
+		else if (port.changePartnerOperDistAlg)
+		{
+			agg.partnerPortAlgorithm = port.partnerOperPortAlgorithm;
+			agg.partnerConversationLinkListDigest = port.partnerOperConversationLinkListDigest;
+			agg.partnerConversationServiceMappingDigest = port.partnerOperConversationServiceMappingDigest;
+			agg.changeDistAlg = true;
+			// Could optimize further processing by only setting change flag if new values differ from old values.
+			if ((SimLog::Debug > 3))
 			{
-				agg.partnerPortAlgorithm = pPort->partnerOperPortAlgorithm;
-				agg.partnerConversationLinkListDigest = pPort->partnerOperConversationLinkListDigest;
-				agg.partnerConversationServiceMappingDigest = pPort->partnerOperConversationServiceMappingDigest;
-				agg.changePartnerDistributionAlgorithm = true;
-				// Could optimize further processing by only setting change flag if new values differ from old values.
-				pPort->changePartnerOperDistAlg = false;
+				SimLog::logFile << "Time " << SimLog::Time << hex << ":  *** Port " << port.actorSystem.addrMid << ":" << port.actorPort.num
+					<< " setting partner's algorithm on Aggregator " << port.actorPortAggregatorIdentifier << "  ***" << dec << endl;
 			}
 		}
 	}
+	port.changePartnerOperDistAlg = false;
 
+}
 
-
-	for (auto pAgg : pAggregators)         // Walk through all Aggregators
+void LinkAgg::updateActorDistributionAlgorithm(Aggregator& thisAgg)
+{
+	for (auto lagPortIndex : thisAgg.lagPorts)      //   walk list of Aggregation Ports on the LAG
 	{
-		if (pAgg->changeActorDistributionAlgorithm || pAgg->changePartnerDistributionAlgorithm)
+		AggPort& port = *(pAggPorts[lagPortIndex]);
+
+		port.actorOperPortAlgorithm = thisAgg.actorPortAlgorithm;
+		port.actorOperConversationLinkListDigest = thisAgg.actorConversationLinkListDigest;
+		port.actorOperConversationServiceMappingDigest = thisAgg.actorConversationServiceMappingDigest;
+		if (port.actorOperPortState.sync)   //     If the AggPort is attached to Aggregator
 		{
-			pAgg->differentPortAlgorithms = ((pAgg->actorPortAlgorithm != pAgg->partnerPortAlgorithm) ||
-				(pAgg->actorPortAlgorithm == Aggregator::portAlgorithms::UNSPECIFIED) ||
-				(pAgg->partnerPortAlgorithm == Aggregator::portAlgorithms::UNSPECIFIED));  // actually, testing partner unspecified is redundant
-			pAgg->differentPortConversationDigests = (pAgg->actorConversationLinkListDigest != pAgg->partnerConversationLinkListDigest);
-			pAgg->differentConversationServiceDigests = (pAgg->actorConversationServiceMappingDigest != pAgg->partnerConversationServiceMappingDigest);
-			pAgg->operDiscardWrongConversation = ((pAgg->adminDiscardWrongConversation == adminValues::FORCE_TRUE) ||
-				((pAgg->adminDiscardWrongConversation == adminValues::AUTO) &&
-				!(pAgg->differentPortAlgorithms || pAgg->differentPortConversationDigests || pAgg->differentConversationServiceDigests)));
-			//TODO:  report to management if any "differentXXX" flags are set
-			//TODO:  Set differentPortConversationDigests if actor and partner Link Numbers don't match 
-			//         (are they guaranteed to be stable by the time actor.sync and partner.sync?)
-			//         (will changes to actor or partner set the change distribution algorithms flag?)
+			port.NTT = true;                //         then communicate change to partner
 			if (SimLog::Debug > 6)
 			{
-				SimLog::logFile << "Time " << SimLog::Time 
-					<< ":   Device:Aggregator " << hex << pAgg->actorSystem.addrMid  << ":" << pAgg->aggregatorIdentifier 
-					<< " differ-Alg/CDigest/SDigest = " << pAgg->differentPortAlgorithms << "/"
-					<< pAgg->differentPortConversationDigests << "/" << pAgg->differentConversationServiceDigests
-					<< "  adminDWC = " << pAgg->adminDiscardWrongConversation << "  DWC = " << pAgg->operDiscardWrongConversation
+				SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << port.actorSystem.addrMid
+					<< ":" << port.actorPort.num << " NTT: Change actor dist algorithm on Link " << dec << port.LinkNumberID
+					<< hex << "  Device:Aggregator " << thisAgg.actorSystem.addrMid << ":" << port.actorPortAggregatorIdentifier
 					<< dec << endl;
 			}
 		}
-
-		if (pAgg->changeAggregationPorts ||              // If a port has gone up or down on the aggregator
-			pAgg->changeActorDistributionAlgorithm ||    //   or distribution algorithms have changed
-			pAgg->changePartnerDistributionAlgorithm)
-			//TODO:  Need to set changeAggregationPorts if Link Number changes or if aAggConversationAdminLink[] changed by management
-			//  Currently aAggConversationAdminLink[] is hard coded in the convLinkPriorityList
-			//TODO:  Don't really need to do this if actorPortAlgorithm or actorConversationServiceMappingDigest changed
-			//    because these only affect mapping frames to CIDs, but not mapping CIDs to active links.
-			//    Likewise with all partner distribution algorithm changes.
-			//TODO:  To clean this up probably need to walk through pAgg->lagPorts twice, once to push out variable changes if the 
-			//    distribution algorithms changed, and again to rebuild active link list if ports went up or down
-			//    or actorConversationAdminLink (or digest of) changed.
+		if (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED))
 		{
-			std::list<unsigned short> newActiveLinkList;  // Build a new list of the link numbers active on the LAG
-			for (auto lagPortIndex : pAgg->lagPorts)      //   from list of Aggregation Ports on the LAG
+			thisAgg.changeDistAlg |= true;
+			thisAgg.changeAggregationLinks |= thisAgg.changeConvLinkList;
+		}
+		thisAgg.changeConvLinkList = false;
+	}
+}
+
+void LinkAgg::updatePartnerAdminDistributionAlgorithm(Aggregator& thisAgg)
+{
+	for (auto lagPortIndex : thisAgg.lagPorts)      //   walk list of Aggregation Ports on the LAG
+	{
+		AggPort& port = *(pAggPorts[lagPortIndex]);
+
+		if (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED) &&
+			(port.actorOperPortState.defaulted || (port.partnerLacpVersion == 1)))
+		{
+			thisAgg.partnerPortAlgorithm = thisAgg.partnerAdminPortAlgorithm;
+			thisAgg.partnerConversationServiceMappingDigest = thisAgg.partnerAdminConversationServiceMappingDigest;
+			thisAgg.partnerConversationLinkListDigest = thisAgg.partnerAdminConversationLinkListDigest;
+			thisAgg.changeDistAlg |= true;
+		}
+	}
+}
+
+void LinkAgg::compareDistributionAlgorithms(Aggregator& thisAgg)
+{
+	bool oldDifferPortConvDigest = thisAgg.differentPortConversationDigests;
+	bool oldDifferentDistAlg = (thisAgg.differentPortAlgorithms ||
+		                        thisAgg.differentPortConversationDigests ||
+	                         	thisAgg.differentConversationServiceDigests);	
+
+	thisAgg.differentPortAlgorithms = ((thisAgg.actorPortAlgorithm != thisAgg.partnerPortAlgorithm) ||
+		(thisAgg.actorPortAlgorithm == Aggregator::portAlgorithms::UNSPECIFIED) ||
+		(thisAgg.partnerPortAlgorithm == Aggregator::portAlgorithms::UNSPECIFIED));  // actually, testing partner unspecified is redundant
+// TODO: temporarily overwriting without check for UNSPECIFIED, since this is the easiest way to make actor and partner match by default
+	thisAgg.differentPortAlgorithms = (thisAgg.actorPortAlgorithm != thisAgg.partnerPortAlgorithm);
+
+	thisAgg.differentPortConversationDigests = (thisAgg.actorConversationLinkListDigest != thisAgg.partnerConversationLinkListDigest);
+	thisAgg.differentConversationServiceDigests = (thisAgg.actorConversationServiceMappingDigest != thisAgg.partnerConversationServiceMappingDigest);
+	bool differentDistAlg = (thisAgg.differentPortAlgorithms || 
+		                     thisAgg.differentPortConversationDigests || 
+							 thisAgg.differentConversationServiceDigests);
+
+	bool partnerMightWin = (thisAgg.actorSystem.id >= thisAgg.partnerSystem.id);
+	// can't compare Port IDs  here, so set flag if partner System ID <= actor System ID
+	thisAgg.changeLinkState |= ((oldDifferentDistAlg != differentDistAlg) && partnerMightWin);
+	// standard (currently) says to use differPortConversationDigests, but no harm is using the 'OR' of all differXxx
+
+	bool oldDWC = thisAgg.operDiscardWrongConversation;
+	thisAgg.operDiscardWrongConversation = ((thisAgg.adminDiscardWrongConversation == adminValues::FORCE_TRUE) ||
+		((thisAgg.adminDiscardWrongConversation == adminValues::AUTO) && !differentDistAlg));
+	thisAgg.changeCSDC |= ((oldDWC != thisAgg.operDiscardWrongConversation) && !thisAgg.activeLagLinks.empty());
+
+
+	//TODO:  report to management if any "differentXXX" flags are set
+	//TODO:  Set differentPortConversationDigests if actor and partner Link Numbers don't match 
+	//         (are they guaranteed to be stable by the time actor.sync and partner.sync?)
+	//         (will changes to actor or partner set the change distribution algorithms flag?)
+	if (SimLog::Debug > 6)
+	{
+		SimLog::logFile << "Time " << SimLog::Time
+			<< ":   Device:Aggregator " << hex << thisAgg.actorSystem.addrMid << ":" << thisAgg.aggregatorIdentifier
+			<< " differ-Alg/CDigest/SDigest = " << thisAgg.differentPortAlgorithms << "/"
+			<< thisAgg.differentPortConversationDigests << "/" << thisAgg.differentConversationServiceDigests
+			<< "  adminDWC = " << thisAgg.adminDiscardWrongConversation << "  DWC = " << thisAgg.operDiscardWrongConversation
+			<< dec << endl;
+	}
+
+}
+
+void LinkAgg::updateActiveLinks(Aggregator& thisAgg)
+{
+	std::list<unsigned short> newActiveLinkList;  // Build a new list of the link numbers active on the LAG
+	for (auto lagPortIndex : thisAgg.lagPorts)      //   from list of Aggregation Ports on the LAG
+	{
+		AggPort& port = *(pAggPorts[lagPortIndex]);
+
+		bool differentDistAlg = (thisAgg.differentPortAlgorithms ||
+			thisAgg.differentPortConversationDigests ||
+			thisAgg.differentConversationServiceDigests);
+
+		bool partnerWins = ((thisAgg.actorSystem.id > thisAgg.partnerSystem.id) ||
+			                ((thisAgg.actorSystem.id == thisAgg.partnerSystem.id) && (port.actorPort.id > port.partnerOperPort.id)));
+			                // Compare Port IDs as well as System IDs, so comparison works with loopback
+
+		if (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED))
+		{
+			unsigned short oldLinkNumberID = port.LinkNumberID;
+			if (!differentDistAlg && partnerWins)
+				port.LinkNumberID = port.partnerLinkNumberID;
+			else
+				port.LinkNumberID = port.adminLinkNumberID;
+
+			newActiveLinkList.push_back(port.LinkNumberID);      // Add its Link Number to the new active link list  
+
+			if (oldLinkNumberID != port.LinkNumberID)
 			{
-				AggPort& port = *(pAggPorts[lagPortIndex]);
-
-				if (pAgg->changeActorDistributionAlgorithm) // If the actor distribution algorithm parameters have been administratively changed
-				{                                         //     then push Aggregator values out to each AggPort on the Aggregator
-					port.actorOperPortAlgorithm = pAgg->actorPortAlgorithm;
-					port.actorOperConversationLinkListDigest = pAgg->actorConversationLinkListDigest;
-					port.actorOperConversationServiceMappingDigest = pAgg->actorConversationServiceMappingDigest;
-					port.actorDWC = pAgg->operDiscardWrongConversation;
-					if (port.actorOperPortState.sync)   //     If the AggPort is attached to Aggregator
-					{
-						port.NTT = true;                //         then communicate change to partner
-						if (SimLog::Debug > 6)
-						{
-							SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << port.actorSystem.addrMid
-								<< ":" << port.actorPort.num << " NTT: Change actor dist algorithm on Link " << dec << port.LinkNumberID
-								<< hex << "  Device:Aggregator " << pAgg->actorSystem.addrMid << ":" << port.actorPortAggregatorIdentifier 
-								<< dec << endl;
-						}
-					}
-				}
-				if (pAgg->changePartnerDistributionAlgorithm)
+				port.NTT = true;
+				if (SimLog::Debug > 6)
 				{
-					port.actorDWC = pAgg->operDiscardWrongConversation;
-					// If want the Aggregator partner distribution algorithm parameters to contain the most recently received, as opposed to
-					//   most recently modified, value of any AggPort received partner distribution algorithm variables,
-					//   then need to push Aggregator values out to any AggPort that is "actor.distributing && !changePartnerOperDistAlg".
-					//   The latter part of test prevents overwriting a value received while this code is executing (if LacpRxSM is truly asynchronous).
-				}
-
-				port.changeActorOperDist = true;    // Set change flag for all ports on aggregator since change to any one 
-				                                      //   could change distribution mask for all.
-				                                      //   But don't need to do this if only partner algorithms changed?
-
-				if (port.actorOperPortState.distributing)                // For any port that is distributing
-				{
-					newActiveLinkList.push_back(port.LinkNumberID);      // Add its Link Number to the new active link list  
+					SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << port.actorSystem.addrMid
+						<< ":" << port.actorPort.num << " NTT: Link Number changing to  " << dec << port.LinkNumberID << endl;
 				}
 			}
+		}
+	}
 
-			if (newActiveLinkList.empty())         // If there are no links active on the LAG 
-			{
-				if (pAgg->operational)                    // if Aggregator was operational
-				{
-					//TODO:  flush aggregator request queue?
-
-					cout << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << pAgg->actorSystem.addrMid << ":" << pAgg->aggregatorIdentifier
-						<< " is DOWN" << dec << endl;
-					if (SimLog::Time > 0)
-					{
-						SimLog::logFile << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << pAgg->actorSystem.addrMid << ":" << pAgg->aggregatorIdentifier
-							<< " is DOWN" << dec << endl;
-					}
-				}
-				pAgg->activeLagLinks.clear();             // Clear the old list of link numbers active on the LAG; 
-				pAgg->operational = false;                // Set Aggregator ISS to not operational
-			}
-			else                                      // There are active links on the LAG
-			{ 
-				newActiveLinkList.sort();                       // Put list of link numbers in ascending order 
-				if (pAgg->activeLagLinks != newActiveLinkList)  // If the active links have changed
-				{
-					cout << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << pAgg->actorSystem.addrMid << ":" << pAgg->aggregatorIdentifier
-						<< " is UP with Link numbers:  " << dec;
-					for (auto link : newActiveLinkList)
-						cout << link << "  ";
-					cout << dec << endl;
-					if (SimLog::Time > 0)
-					{
-						SimLog::logFile << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << pAgg->actorSystem.addrMid << ":" << pAgg->aggregatorIdentifier
-							<< " is UP with Link numbers:  " << dec;
-						for (auto link : newActiveLinkList)
-							SimLog::logFile << link << "  ";
-						SimLog::logFile << dec << endl;
-					}
-				}
-//				std::vector<unsigned short> activeLinkVector ( newActiveLinkList);  // create a vector from a list??
-				pAgg->activeLagLinks = newActiveLinkList;   // Save the new list of active link numbers
-				pAgg->operational = true;                   // The Aggregator ISS is operational
-			}
-			updateConversationLinkMap(*pAgg);           // Create new Conversation ID to Link associations
-			pAgg->changeAggregationPorts = false;    // Finally, clear status change flags
-			pAgg->changeActorDistributionAlgorithm = false;
-			pAgg->changePartnerDistributionAlgorithm = false;
+	if (newActiveLinkList.empty())         // If there are no links active on the LAG 
+	{
+		thisAgg.activeLagLinks.clear();             // Clear the old list of link numbers active on the LAG; 
+	}
+	else                                      // There are active links on the LAG
+	{
+		newActiveLinkList.sort();                       // Put list of link numbers in ascending order 
+		if (thisAgg.activeLagLinks != newActiveLinkList)  // If the active links have changed
+		{
+			thisAgg.activeLagLinks = newActiveLinkList;   // Save the new list of active link numbers
+			thisAgg.changeAggregationLinks |= true;
 			//TODO:  For DRNI have to set a flag to let DRF know that list of active ports may have changed.
-
-			if (SimLog::Debug > 4)
-			{
-				SimLog::logFile << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << pAgg->actorSystem.addrMid
-					<< ":" << pAgg->aggregatorIdentifier << dec << " ConvLinkMap = ";
-				for (int k = 0; k < 16; k++) SimLog::logFile << "  " << pAgg->conversationLinkMap[k];
-				SimLog::logFile << endl;
-			}
 		}
 	}
+}
 
-	for (auto pPort : pAggPorts)
+
+void LinkAgg::updateConversationPortVector(Aggregator& thisAgg)
+{
+	std::array<unsigned short, 4096> oldConvLinkVector = thisAgg.conversationLinkVector;
+	
+	updateConversationLinkVector(thisAgg);           // Create new Conversation ID to Link associations
+
+	if (SimLog::Debug > 4)
 	{
-		if (pPort->changeActorOperDist)
-		{
-			if (pPort->actorOperPortState.distributing)         // If Aggregation Port is distributing 
-			{                                                   //    then create new distribution and collection masks
-				for (int convID = 0; convID < 4096; convID++)   //    for all conversation ID values.
-				{
-					bool passConvID = ((pAggregators[pPort->actorPortAggregatorIndex]->conversationLinkMap[convID] == pPort->LinkNumberID) &&
-						               (pPort->LinkNumberID > 0));       // Determine if conversation ID maps to this port's link number
-					                                                 
-					pPort->portOperConversationMask[convID] = passConvID;   // If so then distribute this conversation ID. 
-					pPort->collectionConversationMask &= passConvID;        // Turn off collection if link number doesn't match.
-				}
-			}
-			else                                             // Else Aggregation Port not Distributing
-			{
-				pPort->portOperConversationMask.reset();        //    so no conversation IDs are distributed
-				pPort->collectionConversationMask.reset();      //    or collected.
-			}
-			// Keep change flag set so can come back and turn on collection
-			//    for a matching link number after the conversation ID has been
-			//    cleared in the collection mask for all other ports on the aggregator.
-
-			if (SimLog::Debug > 4)
-			{
-				SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << pPort->actorSystem.addrMid
-					<< ":" << pPort->actorPort.num << " Link " << dec << pPort->LinkNumberID << "   ConvMask = ";
-				for (int k = 0; k < 16; k++) SimLog::logFile << "  " << pPort->portOperConversationMask[k];
-				SimLog::logFile << endl;
-			}
-		}
+		SimLog::logFile << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << thisAgg.actorSystem.addrMid
+			<< ":" << thisAgg.aggregatorIdentifier << dec << " ConvLinkMap = ";
+		for (int k = 0; k < 16; k++) SimLog::logFile << "  " << thisAgg.conversationLinkVector[k];
+		SimLog::logFile << endl;
 	}
-	//TODO:  Supposed to do the following after have updated all ports (true at this point) and IppAllUpdate is false
-	//          but not clear the IppAllUpdate test is really necessary
-	//  Before just cleared collection mask for Conversation IDs where the port's link number did not match the conversationLinkMap.
-	//     Now want to set the collection mask for Conversation IDs where the port's link number does match.
+
+	thisAgg.changeCSDC |= (thisAgg.conversationLinkVector != oldConvLinkVector);
+	//TODO:  Would be better to have updateConversationLinkVector build a new vector, then copy it into conversationLinkVector if there is a change
+}
+
+void LinkAgg::updateConversationMasks(Aggregator& thisAgg)
+{
+	for (auto lagPortIndex : thisAgg.lagPorts)      //   from list of Aggregation Ports on the LAG
+	{
+		AggPort& port = *(pAggPorts[lagPortIndex]);
+
+		port.actorDWC = thisAgg.operDiscardWrongConversation;  // Update port's copy of DWC
+
+		for (int convID = 0; convID < 4096; convID++)   //    for all conversation ID values.
+		{
+			bool passConvID = ((thisAgg.conversationLinkVector[convID] == port.LinkNumberID) &&
+				(port.LinkNumberID > 0));       // Determine if conversation ID maps to this port's link number
+
+			port.portOperConversationMask[convID] = passConvID;       // If so then distribute this conversation ID. 
+		}
+
+		if (SimLog::Debug > 4)
+		{
+			SimLog::logFile << "Time " << SimLog::Time << ":   Device:Port " << hex << port.actorSystem.addrMid
+				<< ":" << port.actorPort.num << " Link " << dec << port.LinkNumberID << "   ConvMask = ";
+			for (int k = 0; k < 16; k++) SimLog::logFile << "  " << port.portOperConversationMask[k];
+			SimLog::logFile << endl;
+		}
+
+		// Turn off distribution and collection if convID is moving between links.
+		port.distributionConversationMask = port.distributionConversationMask & port.portOperConversationMask;  
+		port.collectionConversationMask = port.collectionConversationMask & port.portOperConversationMask;      
+	}
+
+	//  Before just cleared distribution/collection masks for Conversation IDs where the port's link number did not match the conversationLinkVector.
+	//     Now want to set the distribution/collection mask for Conversation IDs where the port's link number does match.
 	//     This assures "break-before-make" behavior so no Conversation ID bit is ever set in the collection mask for more than one port.
-	for (auto pPort : pAggPorts)
+	for (auto lagPortIndex : thisAgg.lagPorts)      //   from list of Aggregation Ports on the LAG
 	{
-		if (pPort->changeActorOperDist)
-		{
-			pPort->collectionConversationMask = pPort->portOperConversationMask;   // Make collection mask the same as the distribution mask
-			pPort->changeActorOperDist = false;                                    //    Clear change flag since done with this Agg Port
-		}
+		AggPort& port = *(pAggPorts[lagPortIndex]);
 
-		//TODO:  Think should update actorPartnerSync at this point (for all ports, or could do it earlier for any ports that changed).
-		if (!pPort->actorPartnerSync || !pPort->partnerActorPartnerSync)
+		port.distributionConversationMask = port.portOperConversationMask;         // Set distribution mask to the new value
+
+		//TODO:  I think I need more qualification here.  Don't want to collectionConversationMask.set() if not collecting (and SELECTED and partner.sync?)
+		if (thisAgg.operDiscardWrongConversation)                                  // If enforcing Conversation-sensitive Collection
+			port.collectionConversationMask = port.portOperConversationMask;       //    then make collection mask the same as the distribution mask
+		else
+			port.collectionConversationMask.set();                                 // Otherwise make collection mask true for all conversation IDs
+
+		//TODO:  Temporarily stuff this in at this point.  In 802.1AX-REV/d0.1 still have editor's notes regarding partnerAdminConversationMask and  ActPar_Sync.
+		//   Not going to bother updating this code until resolve those issues.
+		if (!port.actorPartnerSync || !port.partnerActorPartnerSync)
 		{
-			pPort->currentWhileLongLacpTimer = 50;
-			pPort->longLacpduXmit = (pPort->enableLongLacpduXmit && (pPort->partnerLacpVersion >= 2));
+			port.currentWhileLongLacpTimer = 50;
+			port.longLacpduXmit = (port.enableLongLacpduXmit && (port.partnerLacpVersion >= 2));
 		}
-		if (pPort->currentWhileLongLacpTimer == 0)
+		if (port.currentWhileLongLacpTimer == 0)
 		{
-			pPort->longLacpduXmit = false;
+			port.longLacpduXmit = false;
 		}
 
 	}
 }
 
-
-
-void LinkAgg::updateConversationLinkMap(Aggregator& thisAgg)
+void LinkAgg::updateAggregatorOperational(Aggregator& thisAgg)
 {
-	switch (thisAgg.selectedConvPortList)
+	bool AggregatorUp = false;
+
+	for (auto lagPortIndex : thisAgg.lagPorts)      //   from list of Aggregation Ports on the LAG
 	{
-	case Aggregator::convPortLists::ADMIN_TABLE:
+		AggPort& port = *(pAggPorts[lagPortIndex]);
+
+		AggregatorUp |= port.actorOperPortState.distributing;
+	}
+
+	if (!AggregatorUp && thisAgg.operational)                    // if Aggregator going down
+	{
+		thisAgg.operational = false;                // Set Aggregator ISS to not operational
+		//TODO:  flush aggregator request queue?
+
+		cout << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << thisAgg.actorSystem.addrMid << ":" << thisAgg.aggregatorIdentifier
+			<< " is DOWN" << dec << endl;
+		if (SimLog::Time > 0)
+		{
+			SimLog::logFile << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << thisAgg.actorSystem.addrMid << ":" << thisAgg.aggregatorIdentifier
+				<< " is DOWN" << dec << endl;
+		}
+	}
+	if (AggregatorUp && !thisAgg.operational)                    // if Aggregator going down
+	{
+		thisAgg.operational = true;                 // Set Aggregator ISS is operational
+
+		cout << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << thisAgg.actorSystem.addrMid << ":" << thisAgg.aggregatorIdentifier
+			<< " is UP with Link numbers:  " << dec;
+		for (auto link : thisAgg.activeLagLinks)
+			cout << link << "  ";
+		cout << dec << endl;
+		if (SimLog::Time > 0)
+		{
+			SimLog::logFile << "Time " << SimLog::Time << ":   Device:Aggregator " << hex << thisAgg.actorSystem.addrMid << ":" << thisAgg.aggregatorIdentifier
+				<< " is UP with Link numbers:  " << dec;
+			for (auto link : thisAgg.activeLagLinks)
+				SimLog::logFile << link << "  ";
+			SimLog::logFile << dec << endl;
+		}
+	}
+}
+
+
+void LinkAgg::updateConversationLinkVector(Aggregator& thisAgg)
+{
+	switch (thisAgg.selectedconvLinkMap)
+	{
+	case Aggregator::convLinkMaps::ADMIN_TABLE:
 		linkMap_AdminTable(thisAgg);
 		break;
-	case Aggregator::convPortLists::ACTIVE_STANDBY:
+	case Aggregator::convLinkMaps::ACTIVE_STANDBY:
 		linkMap_ActiveStandby(thisAgg);
 		break;
-	case Aggregator::convPortLists::EVEN_ODD:
+	case Aggregator::convLinkMaps::EVEN_ODD:
 		linkMap_EvenOdd(thisAgg);
 		break;
-	case Aggregator::convPortLists::EIGHT_LINK_SPREAD:
+	case Aggregator::convLinkMaps::EIGHT_LINK_SPREAD:
 		linkMap_EightLinkSpread(thisAgg);
 		break;
 	}
@@ -473,12 +634,12 @@ void LinkAgg::linkMap_EightLinkSpread(Aggregator& thisAgg)
 	// Then, create the first 8 entries in the conversation-to-link map from the first 8 rows of the Link Priority List table
 	for (int row = 0; row < nRows; row++)
 	{
-		thisAgg.conversationLinkMap[row] = 0;                                       // Link Number 0 is default if no Link Numbers in row are active
+		thisAgg.conversationLinkVector[row] = 0;                                       // Link Number 0 is default if no Link Numbers in row are active
 		for (int j = 0; j < nLinks; j++)                                            // Search a row of the table
 		{                                                                           //   for the first Link Number that is active.
 			if ((convLinkPriorityList[row][j] < activeLinkNumbers.size()) && activeLinkNumbers[convLinkPriorityList[row][j]])
 			{
-				thisAgg.conversationLinkMap[row] = activeLinkNumbers[convLinkPriorityList[row][j]];    //   Copy that Link Number into map
+				thisAgg.conversationLinkVector[row] = activeLinkNumbers[convLinkPriorityList[row][j]];    //   Copy that Link Number into map
 				break;                                                              //       and quit the for loop.
 			}
 		}
@@ -487,7 +648,7 @@ void LinkAgg::linkMap_EightLinkSpread(Aggregator& thisAgg)
 	// Finally, repeat first 8 entries through the rest of the conversation-to-link map
 	for (int row = nRows; row < 4096; row++)
 	{
-		thisAgg.conversationLinkMap[row] = thisAgg.conversationLinkMap[row % nRows];
+		thisAgg.conversationLinkVector[row] = thisAgg.conversationLinkVector[row % nRows];
 	}
 }
 /**/
@@ -496,7 +657,7 @@ void LinkAgg::linkMap_EvenOdd(Aggregator& thisAgg)
 {
 	if (thisAgg.activeLagLinks.empty())              // If there are no active links
 	{
-		thisAgg.conversationLinkMap.fill(0);         //    then the ConversationLinkMap is all zero
+		thisAgg.conversationLinkVector.fill(0);         //    then the conversationLinkVector is all zero
 	} 
 	else                                             // Otherwise ...
 	{
@@ -504,8 +665,8 @@ void LinkAgg::linkMap_EvenOdd(Aggregator& thisAgg)
 		unsigned short oddLink = thisAgg.activeLagLinks.back();      // Odd Conversation IDs go to highest LinkNumberID.  (Other links are standby)
 		for (int j = 0; j < 4096; j += 2)
 		{
-			thisAgg.conversationLinkMap[j] = evenLink;
-			thisAgg.conversationLinkMap[j + 1] = oddLink;
+			thisAgg.conversationLinkVector[j] = evenLink;
+			thisAgg.conversationLinkVector[j + 1] = oddLink;
 		}
 	}
 }
@@ -514,27 +675,27 @@ void LinkAgg::linkMap_ActiveStandby(Aggregator& thisAgg)
 {
 	if (thisAgg.activeLagLinks.empty())              // If there are no active links
 	{
-		thisAgg.conversationLinkMap.fill(0);         //    then the ConversationLinkMap is all zero
+		thisAgg.conversationLinkVector.fill(0);         //    then the conversationLinkVector is all zero
 	}
 	else                                             // Otherwise ...
 	{
 		// Active link will be the lowest LinkNumberID.  All others will be Standby.
 		unsigned short activeLink = thisAgg.activeLagLinks.front();
-		thisAgg.conversationLinkMap.fill(activeLink);
+		thisAgg.conversationLinkVector.fill(activeLink);
 	}
 }
 
 void LinkAgg::linkMap_AdminTable(Aggregator& thisAgg)
 {
-	thisAgg.conversationLinkMap.fill(0);                           // Start with  ConversationLinkMap is all zero
-	for (const auto& entry : thisAgg.conversationPortList)         // For each entry in the administered conversationPortList table (std::map)
+	thisAgg.conversationLinkVector.fill(0);                           // Start with  conversationLinkVector is all zero
+	for (const auto& entry : thisAgg.adminConversationLinkMap)         // For each entry in the administered adminConversationLinkMap table (std::map)
 	{
 		unsigned short convID = entry.first;                       //    Get the conversation ID.
 		for (const auto& link : entry.second)                      //    Walk the prioritized list of desired links for that conversation ID.
 		{
 			if (isInList(link, thisAgg.activeLagLinks))            //    If the desired link is active on the Aggregator
 			{
-				thisAgg.conversationLinkMap[convID] = link;        //        then put that link number in the conversationLinkMap
+				thisAgg.conversationLinkVector[convID] = link;        //        then put that link number in the conversationLinkVector
 				break;
 			}
 		}

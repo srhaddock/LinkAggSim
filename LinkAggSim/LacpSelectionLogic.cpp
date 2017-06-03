@@ -99,8 +99,14 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 		*     2)  Otherwise, if policy is to choose preferred aggregator even if disrupts an active LAG, then see if can join preferred aggregator.
 		*     3)  Otherwise see if can find an Aggregator with no attached ports that are active.
 		*/
+		//TODO:  What action should be taken if MUX machine gets to DETACHED before changeActorOperDist is processed?
+		//   Maybe need to qualify Selection Logic with "DETACHED && !changeActorOperDist" so cannot select new aggregator
+		//   until changeActorOperDist processed on old aggregator (in which case remove checks on "SELECTED || sync").
+		//   Or maybe just move runCSDC() before runSelection()?
+
 		if ((pAggPorts[px]->portSelected == AggPort::selectedVals::UNSELECTED) && !pAggPorts[px]->actorAttached
-			&& !pAggPorts[px]->changeActorOperDist && !pAggPorts[px]->Ready)
+//			&& !pAggPorts[px]->changeActorOperDist   //TODO: do I need an equivalent for new updateMask ???
+			&& !pAggPorts[px]->Ready)
 			// New mux machine added the !Ready term to above, but shouldn't hurt with old mux.  
 			//    This is redundant with !actorAttached if qualified with UNSELECTED.
 			//    If not qualified with UNSELECTED (i.e. allow selection logic to change selected aggregator while wait_while timer
@@ -227,7 +233,7 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				pAggPorts[px]->actorOperPortAlgorithm = pAggregators[chosenAggregatorIndex]->actorPortAlgorithm;
 				pAggPorts[px]->actorOperConversationLinkListDigest = pAggregators[chosenAggregatorIndex]->actorConversationLinkListDigest;
 				pAggPorts[px]->actorOperConversationServiceMappingDigest = pAggregators[chosenAggregatorIndex]->actorConversationServiceMappingDigest;
-				//TODO:  do I need to set actorDWC here as well?
+				//TODO:  do I need to set actorDWC here as well?  No.  Gets updated when link becomes active and updateConversationMasks
 
 				pAggPorts[px]->portSelected = AggPort::selectedVals::SELECTED;                             // Set SELECTED
 				pAggregators[chosenAggregatorIndex]->lagPorts.push_back(px);                               // Put this port on port list of chosen aggregator
@@ -271,25 +277,6 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 	for (auto pAgg : pAggregators)
 //	for (unsigned short j = 0; j < pAggregators.size(); j++)    
 	{
-		/*
-	//TODO:  should this merge with updateAggregatorStatus ?  should it be before actual Selection Logic ?
-	//   The AggregatorReady part, at least, should be here
-		if (pAggregators[j]->changeActorSystem)                                                   // If ActorSystem identifier has changed
-		{
-			clearAggregator(*pAggregators[j], pAggPorts);                                         //    then kick all ports off Aggregator
-			pAggPorts[j]->portSelected = AggPort::selectedVals::UNSELECTED;                       //    and unselect corresponding AggPort
-			pAggregators[j]->changeActorSystem = false;
-		}
-		if (pAggregators[j]->actorOperAggregatorKey != pAggregators[j]->actorAdminAggregatorKey)  // If admin key has changed
-		{
-			clearAggregator(*pAggregators[j], pAggPorts);                                         //    then kick all ports off Aggregator
-			pAggregators[j]->actorOperAggregatorKey = pAggregators[j]->actorAdminAggregatorKey;   //    and update oper key
-		}
-		if (!pAggregators[j]->getEnabled() && !pAggregators[j]->lagPorts.empty())                 // If aggregator disabled and LAG port list not empty
-		{
-			clearAggregator(*(pAggregators[j]), pAggPorts);                                       //    then kick all ports off Aggregator
-		}
-		/**/
 
 		int collPortsInLAG = 0;
 		int distPortsInLAG = 0;
