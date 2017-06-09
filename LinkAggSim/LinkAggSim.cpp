@@ -43,7 +43,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	//	SimLog::logFile << System::DateTime::Now;
 	//	SimLog::logFile << asctime_s(); 
 	SimLog::logFile << endl;
-	SimLog::Debug = 7; // 6 9
+	SimLog::Debug = 8; // 6 9
 
 	void send8Frames(EndStn& source);
 
@@ -56,6 +56,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	void axbkHierarchicalLagTest(std::vector<unique_ptr<Device>>& Devices);
 	void distributionTest(std::vector<unique_ptr<Device>>& Devices);
 	void waitToRestoreTest(std::vector<unique_ptr<Device>>& Devices);
+	void adminVariableTest(std::vector<unique_ptr<Device>>& Devices);
 
 	cout << "*** Start of program ***" << endl << endl;
 	if (SimLog::Debug > 0)
@@ -112,9 +113,9 @@ int _tmain(int argc, _TCHAR* argv[])
 	// limitedAggregatorsTest(Devices);
 	// dualHomingTest(Devices);
 	// axbkHierarchicalLagTest(Devices);
-	distributionTest(Devices);
+	// distributionTest(Devices);
 	// waitToRestoreTest(Devices);
-
+	adminVariableTest(Devices);
 	//
 	// Clean up devices.
 	//
@@ -271,6 +272,7 @@ void basicLagTest(std::vector<unique_ptr<Device>>& Devices)
 void preferredAggregatorTest(std::vector<unique_ptr<Device>>& Devices)
 {
 	int start = SimLog::Time;
+	LinkAgg& dev0Lag = (LinkAgg&)*(Devices[0]->pComponents[1]);  // alias to LinkAgg shim of bridge b00
 
 	cout << endl << endl << "   Preferred Aggregator Tests:  " << endl << endl;
 	if (SimLog::Debug > 0)
@@ -301,17 +303,9 @@ void preferredAggregatorTest(std::vector<unique_ptr<Device>>& Devices)
 		//    non-operational.  
 		//    With small values of aggregateWaitTime there is additional "bouncing" of aggregator operational.
 
-		if (SimLog::Time == start + 250)
-		{
-			LinkAgg& dev0Lag = (LinkAgg&)*(Devices[0]->pComponents[1]);  // alias to LinkAgg shim of bridge b00
-			dev0Lag.pAggPorts[1]->set_aAggPortLinkNumberID(18);          // change link number of b00:101
-		}
-
 		if (SimLog::Time == start + 300)
 		{
 			Mac::Disconnect((Devices[0]->pMacs[1]));                           // Take down first link
-			LinkAgg& dev0Lag = (LinkAgg&)*(Devices[0]->pComponents[1]);  // alias to LinkAgg shim of bridge b00
-			dev0Lag.pAggPorts[1]->set_aAggPortLinkNumberID(2);           // restore link number of b00:101
 		}
 		// Link 3 goes down and conversations immediately re-allocated to other links.
 		// AggPorts b00:102 and b00:103 remain up on Aggregator b00:201
@@ -1080,6 +1074,7 @@ void distributionTest(std::vector<unique_ptr<Device>>& Devices)
 			{
 				pDev->disconnect();      // Disconnect all remaining links on all devices
 			}
+			// TODO:  Need to reset all administrative values to their defaults
 		}
 
 		//  Run all state machines in all devices
@@ -1311,12 +1306,16 @@ void waitToRestoreTest(std::vector<unique_ptr<Device>>& Devices)
 
 
 		if (SimLog::Time == start + 990)
-		{   // Restore key for all Aggregators in Bridge 0 to their default value
+		{   // Restore all default values
 			for (auto pAgg : dev0Lag.pAggregators)
 			{
 				pAgg->set_aAggActorAdminKey(defaultActorKey);
+				pAgg->setEnabled(true);
 			}
-
+			for (auto pPort : dev0Lag.pAggPorts)
+			{
+				pPort->set_aAggPortWTRTime(0);
+			}
 			for (auto& pDev : Devices)
 			{
 				pDev->disconnect();      // Disconnect all remaining links on all devices
@@ -1343,3 +1342,134 @@ void waitToRestoreTest(std::vector<unique_ptr<Device>>& Devices)
 
 }
 
+/**/
+void adminVariableTest(std::vector<unique_ptr<Device>>& Devices)
+{
+	int start = SimLog::Time;
+	// aliases
+	EndStn& dev3EndStn = (EndStn&)*(Devices[3]->pComponents[0]);
+	LinkAgg& dev0LinkAgg = (LinkAgg&)*(Devices[0]->pComponents[1]);
+	LinkAgg& dev1LinkAgg = (LinkAgg&)*(Devices[1]->pComponents[1]);
+	LinkAgg& dev2LinkAgg = (LinkAgg&)*(Devices[2]->pComponents[1]);
+
+	unsigned short savedKey = dev0LinkAgg.pAggPorts[1]->get_aAggActorAdminKey();
+
+	cout << endl << endl << "   Writing Administrative Variables Tests:  " << endl << endl;
+	if (SimLog::Debug > 0)
+		SimLog::logFile << endl << endl << "   Writing Administrative Variables Tests:  " << endl << endl;
+
+	for (auto& pDev : Devices)
+	{
+		pDev->reset();   // Reset all devices
+	}
+
+
+	for (int i = 0; i < 1000; i++)
+	{
+
+		//  Make or break connections
+
+		if (SimLog::Time == start + 10)
+		{   
+			// Set PortAlgorithm to C_VID in all Bridge 1 Aggregators
+			for (auto& pAgg : dev1LinkAgg.pAggregators)
+			{
+				pAgg->set_aAggPortAlgorithm(Aggregator::portAlgorithms::C_VID);
+			}
+		}
+
+		if (SimLog::Time == start + 40)
+		{   // Create three links between Bridges 0 and 1.
+			Mac::Connect((Devices[0]->pMacs[1]), (Devices[1]->pMacs[2]), 5);
+			Mac::Connect((Devices[0]->pMacs[2]), (Devices[1]->pMacs[3]), 5);
+			Mac::Connect((Devices[0]->pMacs[3]), (Devices[1]->pMacs[1]), 5);
+		}
+
+		if (SimLog::Time == start + 100)
+		{
+			dev0LinkAgg.pAggPorts[1]->set_aAggPortActorAdminKey(0x0246);       // change port key
+		}
+
+
+		if (SimLog::Time == start + 200)
+		{
+			dev0LinkAgg.pAggPorts[1]->set_aAggActorAdminKey(0x0246);           // change aggregator key
+		}
+
+		if (SimLog::Time == start + 300)
+		{
+			dev0LinkAgg.pAggPorts[2]->set_aAggActorSystemPriority(0x0135);     // change aggregator SysID (which changes LAG ID)
+		}
+
+		if (SimLog::Time == start + 400)
+		{
+			dev0LinkAgg.pAggPorts[1]->set_aAggPortActorAdminKey(savedKey);     // restore port key
+			dev0LinkAgg.pAggPorts[1]->set_aAggActorAdminKey(savedKey);         // restore aggregator key
+			dev0LinkAgg.pAggPorts[2]->set_aAggActorSystemPriority(0);          // restore aggregator SysID (which changes LAG ID)
+		}
+
+/*
+		if (SimLog::Time == start + 450)                 // Patch up this link until Selection Logic bug is fixed
+		{   
+			dev0LinkAgg.pAggPorts[3]->setEnabled(false);
+		}
+		if (SimLog::Time == start + 454)
+		{   
+			dev0LinkAgg.pAggPorts[3]->setEnabled(true);
+		}
+/**/
+
+		if (SimLog::Time == start + 500)
+		{
+			dev0LinkAgg.pAggPorts[1]->set_aAggPortLinkNumberID(18);            // change link number of b00:101
+		}
+
+		if (SimLog::Time == start + 600)
+		{
+			dev0LinkAgg.pAggPorts[1]->set_aAggPortAlgorithm(Aggregator::portAlgorithms::C_VID);       // change port algorithm
+		}
+
+		if (SimLog::Time == start + 700)
+		{
+			dev0LinkAgg.pAggPorts[1]->set_aAggPortLinkNumberID(2);             // restore link number of b00:101
+		}
+
+		if (SimLog::Time == start + 800)
+		{
+			dev0LinkAgg.pAggPorts[1]->set_aAggPortAlgorithm(Aggregator::portAlgorithms::UNSPECIFIED); // restore port algorithm
+		}
+
+
+		if (SimLog::Time == start + 990)
+		{
+			for (auto& pDev : Devices)
+			{
+				pDev->disconnect();      // Disconnect all remaining links on all devices
+			}
+			for (auto& pAgg : dev1LinkAgg.pAggregators)
+			{
+				pAgg->set_aAggPortAlgorithm(Aggregator::portAlgorithms::UNSPECIFIED);
+			}
+		}
+
+		//  Run all state machines in all devices
+		for (auto& pDev : Devices)
+		{
+			pDev->timerTick();     // Decrement timers
+			pDev->run(true);       // Run device with single-step true
+		}
+
+		//  Transmit from any MAC with frames to transmit
+		for (auto& pDev : Devices)
+		{
+			pDev->transmit();
+		}
+
+		if (SimLog::Debug > 1)
+			SimLog::logFile << "*" << endl;
+		SimLog::Time++;
+	}
+
+}
+
+/**/

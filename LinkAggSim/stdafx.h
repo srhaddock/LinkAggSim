@@ -22,6 +22,7 @@
 #include <list>
 #include <bitset>
 #include <map>
+#include <string>
 
 
 using std::cout;

@@ -126,14 +126,14 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 				//   or even whether the Aggregator is enabled (only time a AggPort will select a disabled Aggregator).
 				clearAggregator(*pAggregators[px], pAggPorts);        //     Then kick other ports (if any) off own aggregator
 				chosenAggregatorIndex = px;                           //       and make own aggregrator the chosen aggregator
-				if (SimLog::Debug > 7) SimLog::logFile << "Time " << SimLog::Time << "       Individual Port ";
+				if (SimLog::Debug > 8) SimLog::logFile << "Time " << SimLog::Time << "       Individual Port ";
 			}
 			else if (pAggPorts[px]->partnerOperPortState.aggregation)            // Else if partner is also aggregatable
 			{
 				chosenAggregatorIndex = findMatchingAggregator(px, pAggPorts);   //     Then see if can join an existing LAG
-				if (SimLog::Debug > 7) SimLog::logFile << "Time " << SimLog::Time << "                  Port ";
+				if (SimLog::Debug > 8) SimLog::logFile << "Time " << SimLog::Time << "                  Port ";
 			}
-			if (SimLog::Debug > 7) SimLog::logFile << hex << pAggPorts[px]->actorSystem.id << ":" << pAggPorts[px]->actorPort.id << dec
+			if (SimLog::Debug > 8) SimLog::logFile << hex << pAggPorts[px]->actorSystem.id << ":" << pAggPorts[px]->actorPort.id << dec
 				<< " finds matching Aggregator " << chosenAggregatorIndex;
 
 			if (chosenAggregatorIndex > px)                           // if not joining existing LAG or only on higher aggregator
@@ -170,7 +170,7 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 					}
 					chosenAggregatorIndex = px;                                //     Make preferred aggregator the chosen aggregator                          
 				}
-				if (SimLog::Debug > 7) SimLog::logFile << "  ... " << chosenAggregatorIndex;
+				if (SimLog::Debug > 8) SimLog::logFile << "  ... " << chosenAggregatorIndex;
 				/*
 				*   This section will attempt to find an aggregator with no active ports.
 				*   
@@ -208,9 +208,9 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 					}
 
 				}
-				if (SimLog::Debug > 7) SimLog::logFile << "  ... " << chosenAggregatorIndex;
+				if (SimLog::Debug > 8) SimLog::logFile << "  ... " << chosenAggregatorIndex;
 			}
-			if (SimLog::Debug > 7) SimLog::logFile << dec << endl;
+			if (SimLog::Debug > 8) SimLog::logFile << dec << endl;
 
 			/*
 			*   If have chosen an aggregator, then update the LAGID etc of that aggregator and put port on aggregator's port list.
@@ -343,6 +343,7 @@ int LinkAgg::LacpSelection::findMatchingAggregator(int thisIndex, std::vector<sh
 	AggPort& thisPort = *pAggPorts[thisIndex];
 	bool foundMatch = false;
 	unsigned short ax = 0;
+	int chosen = pAggPorts.size();   // no aggregator chosen yet
 
 	for (ax = 0; ax < pAggregators.size(); ax++)     // walk through Aggregator array using ax as index
 	{
@@ -356,8 +357,8 @@ int LinkAgg::LacpSelection::findMatchingAggregator(int thisIndex, std::vector<sh
 
 				if (SimLog::Debug > 2)
 					SimLog::logFile << "Time " << SimLog::Time << ":     Port " << hex << thisPort.actorPort.num << " same-port-loopback foundMatch "
-						<< foundMatch << " agg " << pAggregators[ax]->aggregatorIdentifier << " agg_Loopback " << pAggregators[ax]->aggregatorLoopback
-						<< dec << endl;
+					<< foundMatch << " agg " << pAggregators[ax]->aggregatorIdentifier << " agg_Loopback " << pAggregators[ax]->aggregatorLoopback
+					<< dec << endl;
 			}
 			else                                                                                      //  else loopback is to different port
 			{
@@ -371,8 +372,8 @@ int LinkAgg::LacpSelection::findMatchingAggregator(int thisIndex, std::vector<sh
 
 				if (SimLog::Debug > 2)
 					SimLog::logFile << "Time " << SimLog::Time << ":     Port " << hex << thisPort.actorPort.num << " diff-port-loopback foundMatch "
-						<< foundMatch << " agg " << pAggregators[ax]->aggregatorIdentifier << " agg_Loopback " << pAggregators[ax]->aggregatorLoopback
-						<< dec << endl;
+					<< foundMatch << " agg " << pAggregators[ax]->aggregatorIdentifier << " agg_Loopback " << pAggregators[ax]->aggregatorLoopback
+					<< dec << endl;
 			}
 		}
 		/*
@@ -382,14 +383,32 @@ int LinkAgg::LacpSelection::findMatchingAggregator(int thisIndex, std::vector<sh
 		*
 		else                                                                                         // else this port not a loopback
 		{
-			foundMatch &= !Aggregators[ax].aggregatorLoopback;         //  find another if this aggregator chosen by a same-port-looback
+		foundMatch &= !Aggregators[ax].aggregatorLoopback;         //  find another if this aggregator chosen by a same-port-looback
 		}
 		/**/
-		
-		if (foundMatch) break;
+
+		if (foundMatch)
+		{
+			if (ax < chosen)
+				chosen = ax;                                           // choose lowest matching aggregator
+			else
+				clearAggregator(*pAggregators[ax], pAggPorts);         // kick all ports off any higher matching aggregatos
+		                                                               //   to force all ports with same LAG ID to move to lowest matching aggregator
+			// This ensures don't end up with two aggregators with the same LAGID, which could happen if change the LAGID of a lower aggregator
+			//    to match the LAGID of a higher aggregator that already has ports attached.
+			// This puts in a bias for the lowest aggregator.  
+			// I think if wanted to minimize disruption, then instead of automatically clearing higher aggregator:
+			//   if (higher aggregator has ports with Selected = SELECTED)
+			//   {
+			//       if (chosen aggregator does not have ports with Selected = SELECTED)
+			//           chosen = ax;                                  // choose aggregator that already has ports selected
+			//       else
+			//           clearAggregator(*pAggregators[ax], pAggPorts);  // otherwise clear the higher aggregator
+			//   }
+		}
 	}
 
-	return (ax);
+	return (chosen);
 }
 
 

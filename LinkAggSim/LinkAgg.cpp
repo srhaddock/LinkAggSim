@@ -223,36 +223,43 @@ void LinkAgg::updateMask(Aggregator& agg)
 	{
 		if (agg.changeActorDistAlg)
 		{
+			debugUpdateMask(agg, "updateActorDistributionAlgorithm");
 			agg.changeActorDistAlg = false;
 			updateActorDistributionAlgorithm(agg);
 		}
 		else if (agg.changePartnerAdminDistAlg)
 		{
+			debugUpdateMask(agg, "updatePartnerAdminDistributionAlgorithm");
 			agg.changePartnerAdminDistAlg = false;
 			updatePartnerAdminDistributionAlgorithm(agg);
 		}
 		else if (agg.changeDistAlg)
 		{
+			debugUpdateMask(agg, "compareDistributionAlgorithms");
 			agg.changeDistAlg = false;
 			compareDistributionAlgorithms(agg);
 		}
 		else if (agg.changeLinkState)
 		{
+			debugUpdateMask(agg, "updateActiveLinks");
 			agg.changeLinkState = false;
 			updateActiveLinks(agg);
 		}
 		else if (agg.changeAggregationLinks)
 		{
+			debugUpdateMask(agg, "updateConversationPortVector");
 			agg.changeAggregationLinks = false;
 			updateConversationPortVector(agg);
 		}
 		else if (agg.changeCSDC)
 		{
+			debugUpdateMask(agg, "updateConversationMasks");
 			agg.changeCSDC = false;
 			updateConversationMasks(agg);
 		}
 		else if (agg.changeDistributing)
 		{
+			debugUpdateMask(agg, "updateAggregatorOperational");
 			agg.changeDistributing = false;
 			updateAggregatorOperational(agg);
 		}
@@ -260,6 +267,17 @@ void LinkAgg::updateMask(Aggregator& agg)
 		loop++;
 	} while (loop < 10);
 
+}
+
+void LinkAgg::debugUpdateMask(Aggregator& thisAgg, std::string routine)
+{
+	if (SimLog::Debug > 7)
+	{
+		SimLog::logFile << "Time " << SimLog::Time
+			<< ":   Device:Aggregator " << hex << thisAgg.actorSystem.addrMid << ":" << thisAgg.aggregatorIdentifier
+			<< " entering updateMask = " << routine
+			<< dec << endl;
+	}
 }
 
 void LinkAgg::updatePartnerDistributionAlgorithm(AggPort& port)
@@ -277,6 +295,14 @@ void LinkAgg::updatePartnerDistributionAlgorithm(AggPort& port)
 	//     Assumes that the portOper... distribution algorithm parameters are null for any port that expects the 
 	//     Aggregator to use the partnerAdmin... values (including port that is DEFAULTED, is version 1 (?), 
 	//     or did not receive the proper V2 TLVs from the partner.
+
+	if ((SimLog::Debug > 7) && port.changePartnerOperDistAlg)
+	{
+		SimLog::logFile << "Time " << SimLog::Time
+			<< ":   Device:Aggregator " << hex << ":  *** Port " << port.actorSystem.addrMid << ":" << port.actorPort.num
+			<< " entering updateMask = updatePartnerDistributionAlgorithm"
+			<< dec << endl;
+	}
 
 	if (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED))
 		// Need to test partner.sync and/or portOperational as well?
@@ -370,8 +396,8 @@ void LinkAgg::compareDistributionAlgorithms(Aggregator& thisAgg)
 	thisAgg.differentPortAlgorithms = ((thisAgg.actorPortAlgorithm != thisAgg.partnerPortAlgorithm) ||
 		(thisAgg.actorPortAlgorithm == Aggregator::portAlgorithms::UNSPECIFIED) ||
 		(thisAgg.partnerPortAlgorithm == Aggregator::portAlgorithms::UNSPECIFIED));  // actually, testing partner unspecified is redundant
-// TODO: temporarily overwriting without check for UNSPECIFIED, since this is the easiest way to make actor and partner match by default
-	thisAgg.differentPortAlgorithms = (thisAgg.actorPortAlgorithm != thisAgg.partnerPortAlgorithm);
+//  temporarily overwriting without check for UNSPECIFIED, since this is the easiest way to make actor and partner match by default
+//	thisAgg.differentPortAlgorithms = (thisAgg.actorPortAlgorithm != thisAgg.partnerPortAlgorithm);
 
 	thisAgg.differentPortConversationDigests = (thisAgg.actorConversationLinkListDigest != thisAgg.partnerConversationLinkListDigest);
 	thisAgg.differentConversationServiceDigests = (thisAgg.actorConversationServiceMappingDigest != thisAgg.partnerConversationServiceMappingDigest);
@@ -443,28 +469,32 @@ void LinkAgg::updateActiveLinks(Aggregator& thisAgg)
 		}
 	}
 
-	if (newActiveLinkList.empty())         // If there are no links active on the LAG 
+	newActiveLinkList.sort();                       // Put list of link numbers in ascending order 
+	if (thisAgg.activeLagLinks != newActiveLinkList)  // If the active links have changed
 	{
-		thisAgg.activeLagLinks.clear();             // Clear the old list of link numbers active on the LAG; 
-	}
-	else                                      // There are active links on the LAG
-	{
-		newActiveLinkList.sort();                       // Put list of link numbers in ascending order 
-		if (thisAgg.activeLagLinks != newActiveLinkList)  // If the active links have changed
-		{
-			thisAgg.activeLagLinks = newActiveLinkList;   // Save the new list of active link numbers
-			thisAgg.changeAggregationLinks |= true;
-			//TODO:  For DRNI have to set a flag to let DRF know that list of active ports may have changed.
-		}
+		thisAgg.activeLagLinks = newActiveLinkList;   // Save the new list of active link numbers
+		thisAgg.changeAggregationLinks |= true;
+		//TODO:  For DRNI have to set a flag to let DRF know that list of active ports may have changed.
 	}
 }
 
 
 void LinkAgg::updateConversationPortVector(Aggregator& thisAgg)
 {
-	std::array<unsigned short, 4096> oldConvLinkVector = thisAgg.conversationLinkVector;
-	
-	updateConversationLinkVector(thisAgg);           // Create new Conversation ID to Link associations
+	if (thisAgg.activeLagLinks.empty())         // If there are no links active on the LAG 
+	{
+		thisAgg.conversationLinkVector.fill(0);          // Clear all Conversation ID to Link associations; 
+		// Don't need to update conversation masks because disableCollectingDistributing will clear masks when links go inactive
+	}
+	else                                        // Otherwise there are active links on the LAG
+	{
+		std::array<unsigned short, 4096> oldConvLinkVector = thisAgg.conversationLinkVector;
+
+		updateConversationLinkVector(thisAgg);           // Create new Conversation ID to Link associations
+
+		thisAgg.changeCSDC |= (thisAgg.conversationLinkVector != oldConvLinkVector);
+		//TODO:  Would be better to have updateConversationLinkVector build a new vector, then copy it into conversationLinkVector if there is a change
+	}
 
 	if (SimLog::Debug > 4)
 	{
@@ -473,9 +503,6 @@ void LinkAgg::updateConversationPortVector(Aggregator& thisAgg)
 		for (int k = 0; k < 16; k++) SimLog::logFile << "  " << thisAgg.conversationLinkVector[k];
 		SimLog::logFile << endl;
 	}
-
-	thisAgg.changeCSDC |= (thisAgg.conversationLinkVector != oldConvLinkVector);
-	//TODO:  Would be better to have updateConversationLinkVector build a new vector, then copy it into conversationLinkVector if there is a change
 }
 
 void LinkAgg::updateConversationMasks(Aggregator& thisAgg)
@@ -488,8 +515,9 @@ void LinkAgg::updateConversationMasks(Aggregator& thisAgg)
 
 		for (int convID = 0; convID < 4096; convID++)   //    for all conversation ID values.
 		{
-			bool passConvID = ((thisAgg.conversationLinkVector[convID] == port.LinkNumberID) &&
-				(port.LinkNumberID > 0));       // Determine if conversation ID maps to this port's link number
+			bool passConvID = (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED) &&
+				(thisAgg.conversationLinkVector[convID] == port.LinkNumberID) && (port.LinkNumberID > 0));
+				// Determine if link is active and the conversation ID maps to this link number
 
 			port.portOperConversationMask[convID] = passConvID;       // If so then distribute this conversation ID. 
 		}

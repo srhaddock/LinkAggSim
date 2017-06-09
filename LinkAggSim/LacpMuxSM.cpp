@@ -459,8 +459,8 @@ void AggPort::LacpMuxSM::disableDistributing(AggPort& port)
 void AggPort::LacpMuxSM::enableCollectingDistributing(AggPort& port)
 {
 	port.changeActorDistributing = true;
-	port.changePartnerOperDistAlg = true;
-	port.changePortLinkState = true;
+	port.changePartnerOperDistAlg |= !port.actorOperPortState.collecting;
+	port.changePortLinkState |= !port.actorOperPortState.collecting;
 
 	if ((SimLog::Debug > 0))
 	{

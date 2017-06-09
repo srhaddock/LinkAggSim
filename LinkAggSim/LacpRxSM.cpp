@@ -431,15 +431,20 @@ void AggPort::LacpRxSM::recordConversationPortDigestTlv(AggPort& port, const Lac
 			if (port.partnerLinkNumberID != rxLacpdu.linkNumberID)
 			{
 				port.partnerLinkNumberID = rxLacpdu.linkNumberID;   // store new partner link number
-				port.changePortLinkState |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));
+				port.changePortLinkState |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED)
+					&& ((port.actorSystem.id > port.partnerOperSystem.id) ||
+							((port.actorSystem.id == port.partnerOperSystem.id) && (port.actorPort.id > port.partnerOperPort.id)))
+				);
 				//       if link active (and will stay active) then need to update aggregator value
+				//          Could also qualify this with partnerWins, to prevent unnecessary call to updateActiveLinks when 
+				//              partner link number changes to match actor
 			}
 
 			if (port.partnerOperConversationLinkListDigest != rxLacpdu.actorConversationLinkListDigest)  // if partner digest changed
 			{
 				port.partnerOperConversationLinkListDigest = rxLacpdu.actorConversationLinkListDigest;   //    then store new value
-				port.changePartnerOperDistAlg |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));    
-					//       if link active (and will stay active) then need to update aggregator value
+				port.changePartnerOperDistAlg |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));
+				//       if link active (and will stay active) then need to update aggregator value
 			}
 		}
 		else      // if no TLV (even though partner is v2) then set to defaults
@@ -447,8 +452,13 @@ void AggPort::LacpRxSM::recordConversationPortDigestTlv(AggPort& port, const Lac
 			if (port.partnerLinkNumberID != port.adminLinkNumberID)
 			{
 				port.partnerLinkNumberID = port.adminLinkNumberID;   // store default link number
-				port.changePortLinkState |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED));
+				port.changePortLinkState |= (port.actorOperPortState.collecting && (port.portSelected == selectedVals::SELECTED)
+					&& ((port.actorSystem.id > port.partnerOperSystem.id) ||
+					((port.actorSystem.id == port.partnerOperSystem.id) && (port.actorPort.id > port.partnerOperPort.id)))
+					);
 				//       if link active (and will stay active) then need to update aggregator value
+				//          Could also qualify this with partnerWins, to prevent unnecessary call to updateActiveLinks when 
+				//              partner link number changes to match actor
 			}
 
 			if (!digestIsNull(port.partnerOperConversationLinkListDigest))  // if partner digest changing to default

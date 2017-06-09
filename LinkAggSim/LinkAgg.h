@@ -49,6 +49,7 @@ private:
 	void updateConversationPortVector(Aggregator& thisAgg);
 	void updateConversationMasks(Aggregator& thisAgg);
 	void updateAggregatorOperational(Aggregator& thisAgg);
+	void debugUpdateMask(Aggregator& thisAgg, std::string routine);
 
 	void updateAggregatorStatus();
 	void updateConversationLinkVector(Aggregator& thisAgg);
