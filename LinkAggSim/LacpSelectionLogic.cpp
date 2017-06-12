@@ -336,7 +336,7 @@ void LinkAgg::LacpSelection::runSelection(std::vector<shared_ptr<AggPort>>& pAgg
 	/**/
 }
 
-
+/**/
 int LinkAgg::LacpSelection::findMatchingAggregator(int thisIndex, std::vector<shared_ptr<AggPort>>& pAggPorts)
 {
 	std::vector<shared_ptr<AggPort>> pAggregators = pAggPorts;
@@ -374,6 +374,11 @@ int LinkAgg::LacpSelection::findMatchingAggregator(int thisIndex, std::vector<sh
 					SimLog::logFile << "Time " << SimLog::Time << ":     Port " << hex << thisPort.actorPort.num << " diff-port-loopback foundMatch "
 					<< foundMatch << " agg " << pAggregators[ax]->aggregatorIdentifier << " agg_Loopback " << pAggregators[ax]->aggregatorLoopback
 					<< dec << endl;
+			}
+			if (foundMatch)
+			{
+				chosen = ax;
+				break;  // in loopback case, stop once found first matching aggregator
 			}
 		}
 		/*

@@ -107,8 +107,8 @@ int _tmain(int argc, _TCHAR* argv[])
 	//
 
 	// basicLagTest(Devices);
-	preferredAggregatorTest(Devices);
-	// lagLoopbackTest(Devices);
+	// preferredAggregatorTest(Devices);
+	lagLoopbackTest(Devices);
 	// nonAggregatablePortTest(Devices);
 	// limitedAggregatorsTest(Devices);
 	// dualHomingTest(Devices);
