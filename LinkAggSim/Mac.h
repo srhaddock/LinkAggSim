@@ -37,7 +37,7 @@ class Iss
 {
 public:
 	Iss();     // Constructor
-	~Iss();    // Destructor
+	virtual ~Iss();    // Destructor
 	Iss(Iss& copySource) = delete;             // Disable copy constructor
 	Iss& operator= (const Iss&) = delete;      // Disable assignment operator
 
@@ -65,7 +65,7 @@ class IssQ : public Iss
 {
 public:
 	IssQ();
-	~IssQ();
+	virtual ~IssQ();
 	IssQ(IssQ& copySource) = delete;             // Disable copy constructor
 	IssQ& operator= (const IssQ&) = delete;      // Disable assignment operator
 
@@ -96,7 +96,7 @@ class Component
 {
 public:
 	Component(ComponentTypes type);     // Constructor
-	~Component();                       // Destructor
+	virtual ~Component();                       // Destructor
 	Component(Component& copySource) = delete;             // Disable copy constructor
 	Component& operator= (const Component&) = delete;      // Disable assignment operator
 

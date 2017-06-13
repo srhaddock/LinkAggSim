@@ -81,7 +81,7 @@ class Aggregator : public IssQ
 
 public:
 	Aggregator(unsigned char version = 2, unsigned short systemNum = 0, unsigned short portNum = 0);
-	~Aggregator();
+	virtual ~Aggregator();
 	Aggregator(Aggregator& copySource) = delete;             // Disable copy constructor
 	Aggregator& operator= (const Aggregator&) = delete;      // Disable assignment operator
 

@@ -43,7 +43,7 @@ class Sdu
 public:
 	Sdu(unsigned short sduEtherType = 0, unsigned short sduSubType = 0);
 	Sdu(const Sdu& copySource);  // Copy constructor
-	~Sdu();
+	virtual ~Sdu();
 
 	int TimeStamp;
 
