@@ -148,7 +148,8 @@ protected:
 	bool differentPortAlgorithms;
 	bool differentPortConversationDigests;
 	std::list<unsigned short> activeLagLinks;  // contains Link Number ID if AggPort attached and distributing, else Link Number = 0
-	std::array<unsigned short, 4096> conversationLinkVector;  // Indexed Conversation ID; contains LinkNumberID of Aggregation Port for that Conversation ID.
+	std::array<unsigned short, 4096> conversationLinkVector;  // Contains LinkNumberID of AggPort for each Conversation ID.
+	std::array<unsigned short, 4096> conversationPortVector;  // Contains PortNumber of AggPort for each Conversation ID.
 	convLinkMaps selectedconvLinkMap;
 
 

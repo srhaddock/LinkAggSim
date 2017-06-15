@@ -192,6 +192,7 @@ void LinkAgg::resetCSDC()
 
 		agg.activeLagLinks.clear();
 		agg.conversationLinkVector.fill(0);
+		agg.conversationPortVector.fill(0);
 
 		agg.changeActorDistAlg = false;
 		agg.changeConvLinkList = false;
@@ -484,16 +485,37 @@ void LinkAgg::updateConversationPortVector(Aggregator& thisAgg)
 	if (thisAgg.activeLagLinks.empty())         // If there are no links active on the LAG 
 	{
 		thisAgg.conversationLinkVector.fill(0);          // Clear all Conversation ID to Link associations; 
+		thisAgg.conversationPortVector.fill(0);          // Clear all Conversation ID to Port associations; 
 		// Don't need to update conversation masks because disableCollectingDistributing will clear masks when links go inactive
 	}
 	else                                        // Otherwise there are active links on the LAG
 	{
-		std::array<unsigned short, 4096> oldConvLinkVector = thisAgg.conversationLinkVector;
-
 		updateConversationLinkVector(thisAgg);           // Create new Conversation ID to Link associations
 
-		thisAgg.changeCSDC |= (thisAgg.conversationLinkVector != oldConvLinkVector);
-		//TODO:  Would be better to have updateConversationLinkVector build a new vector, then copy it into conversationLinkVector if there is a change
+		std::array<unsigned short, 4096> newConvPortVector;  // Create temporary new CID to Port vector
+		newConvPortVector.fill(0);                           // Clear new Conversation ID to Port associations; 
+		for (auto lagPortIndex : thisAgg.lagPorts)
+		{
+			AggPort& port = *(pAggPorts[lagPortIndex]);
+
+			if (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED)
+				&& (port.LinkNumberID > 0))
+			{
+				for (unsigned short cid = 0; cid < 4096; cid++)
+				{
+					if (thisAgg.conversationLinkVector[cid] == port.LinkNumberID)
+					{
+						newConvPortVector[cid] = port.actorPort.num;
+					}
+				}
+			}
+		}
+
+		if (thisAgg.conversationPortVector != newConvPortVector)
+		{
+			thisAgg.conversationPortVector = newConvPortVector;
+			thisAgg.changeCSDC = true;
+		}
 	}
 
 	if (SimLog::Debug > 4)
@@ -516,8 +538,8 @@ void LinkAgg::updateConversationMasks(Aggregator& thisAgg)
 		for (int convID = 0; convID < 4096; convID++)   //    for all conversation ID values.
 		{
 			bool passConvID = (port.actorOperPortState.collecting && (port.portSelected == AggPort::selectedVals::SELECTED) &&
-				(thisAgg.conversationLinkVector[convID] == port.LinkNumberID) && (port.LinkNumberID > 0));
-				// Determine if link is active and the conversation ID maps to this link number
+				(thisAgg.conversationPortVector[convID] == port.actorPort.num) && (port.actorPort.num > 0));
+				// Determine if link is active and the conversation ID maps to this port number
 
 			port.portOperConversationMask[convID] = passConvID;       // If so then distribute this conversation ID. 
 		}

@@ -118,7 +118,7 @@ void Aggregator::reset()
 	operDiscardWrongConversation = false;
 	activeLagLinks.clear();
 	conversationLinkVector.fill(0);
-
+	conversationPortVector.fill(0);
 
 	changeActorDistAlg = false;
 	changeConvLinkList = false;

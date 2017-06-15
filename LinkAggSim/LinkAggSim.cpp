@@ -1429,6 +1429,11 @@ void adminVariableTest(std::vector<unique_ptr<Device>>& Devices)
 			dev0LinkAgg.pAggPorts[1]->set_aAggPortAlgorithm(Aggregator::portAlgorithms::C_VID);       // change port algorithm
 		}
 
+		if (SimLog::Time == start + 630)
+		{
+			dev0LinkAgg.pAggPorts[2]->set_aAggPortLinkNumberID(18);             // create duplicate link number on b00:102
+		}
+
 		if (SimLog::Time == start + 700)
 		{
 			dev0LinkAgg.pAggPorts[1]->set_aAggPortLinkNumberID(2);             // restore link number of b00:101
@@ -1437,6 +1442,16 @@ void adminVariableTest(std::vector<unique_ptr<Device>>& Devices)
 		if (SimLog::Time == start + 800)
 		{
 			dev0LinkAgg.pAggPorts[1]->set_aAggPortAlgorithm(Aggregator::portAlgorithms::UNSPECIFIED); // restore port algorithm
+		}
+
+		if (SimLog::Time == start + 830)
+		{
+			dev0LinkAgg.pAggPorts[2]->set_aAggPortLinkNumberID(2);             // create duplicate link number on b00:102
+		}
+
+		if (SimLog::Time == start + 860)
+		{
+			dev0LinkAgg.pAggPorts[2]->set_aAggPortLinkNumberID(3);             // restore link number of b00:102
 		}
 
 
